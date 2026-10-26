@@ -263,17 +263,17 @@ function renderGroup(g) {
       { label: 'Cambiar color', run: () => colorPicker(head, g.color, async c => { g.color = c || '#0080E8'; render(); await q(sb.from('groups').update({ color: g.color }).eq('id', g.id)); }) },
       '-', { label: 'Eliminar grupo', danger: true, run: () => delGroup(g) }]) }) : null);
   if (collapsed) return h('section', { class: 'group', 'data-group': g.id }, head);
-  const thead = h('thead', {}, h('tr', { 'data-scope': 'project' }, h('th', { class: 'c-drag' }), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Proyecto'))),
+  const thead = h('thead', {}, h('tr', { 'data-scope': 'project' }, h('th', { class: 'c-drag' }), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Proyecto')), nameResizer('project')),
     pc.map(c => colHeader(c)), h('th', { class: 'c-add' }, canEdit() ? h('button', { class: 'icon-btn', svg: I.plus, title: 'Agregar columna', 'aria-label': 'Agregar columna', onclick: () => addColumn('project') }) : null)));
   const tbody = h('tbody', { 'data-group': g.id });
   for (const p of list) { tbody.append(projectRow(p, pc)); if (S.open.has(p.id)) tbody.append(subRow(p, pc.length + 3)); }
   const foot = h('tfoot', {});
   if (canEdit()) foot.append(h('tr', { class: 'add-row' }, h('td', { class: 'c-drag' }), h('td', { class: 'c-name', colSpan: 1 },
     h('input', { placeholder: '+ Agregar proyecto', 'aria-label': 'Agregar proyecto', onkeydown: async e => { if (e.key === 'Enter' && e.target.value.trim()) { const v = e.target.value.trim(); e.target.value = ''; await createProject({ group_id: g.id, data: { name: v } }); } } })),
-    h('td', { colSpan: pc.length + 1 })));
+    pc.map(c => h('td', {}, addCell({ group_id: g.id }, c))), h('td', {})));
   foot.append(sumRow(list, pc));
   return h('section', { class: 'group', 'data-group': g.id, style: `--gc:${g.color}` }, head,
-    h('div', { class: 'tbl-wrap', 'data-scroll': g.id }, h('table', { class: 'board' }, h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { style: 'width:300px' }), pc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })), thead, tbody, foot)));
+    h('div', { class: 'tbl-wrap', 'data-scroll': g.id }, h('table', { class: 'board' }, h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { 'data-namew': 'project', style: `width:${nameW('project')}px` }), pc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })), thead, tbody, foot)));
 }
 function colHeader(c) {
   return h('th', { class: 'dcol', 'data-col': c.id, title: c.label }, h('div', { class: 'th-in' }, h('span', {}, c.label),
@@ -322,14 +322,30 @@ function subRow(p, span) {
     sc.map(c => h('td', {}, cellView(s, c, true))), h('td', {}))));
   const foot = h('tfoot', {});
   if (canEdit()) foot.append(h('tr', { class: 'add-row' }, h('td', { class: 'c-drag' }), h('td', { class: 'c-name' },
-    h('input', { placeholder: '+ Agregar subtarea', 'aria-label': 'Agregar subtarea', onkeydown: async e => { if (e.key === 'Enter' && e.target.value.trim()) { const v = e.target.value.trim(); e.target.value = ''; await createProject({ group_id: p.group_id, parent_id: p.id, data: { name: v } }); } } })), h('td', { colSpan: sc.length + 1 })));
+    h('input', { placeholder: '+ Agregar subtarea', 'aria-label': 'Agregar subtarea', onkeydown: async e => { if (e.key === 'Enter' && e.target.value.trim()) { const v = e.target.value.trim(); e.target.value = ''; await createProject({ group_id: p.group_id, parent_id: p.id, data: { name: v } }); } } })), sc.map(c => h('td', {}, addCell({ group_id: p.group_id, parent_id: p.id }, c))), h('td', {})));
   if (subs.length) foot.append(sumRow(subs, sc, true));
   return h('tr', { class: 'subwrap', 'data-for': p.id }, h('td', { colSpan: span, style: p.color ? `--rc:${p.color}` : '' },
     h('div', { class: 'subbox', 'data-scroll': 'sub-' + p.id }, h('table', { class: 'board' },
-      h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { style: 'width:260px' }), sc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })),
-      h('thead', {}, h('tr', { 'data-scope': 'sub' }, h('th', { class: 'c-drag' }), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Subtarea'))), sc.map(c => colHeader(c)),
+      h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { 'data-namew': 'sub', style: `width:${nameW('sub')}px` }), sc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })),
+      h('thead', {}, h('tr', { 'data-scope': 'sub' }, h('th', { class: 'c-drag' }), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Subtarea')), nameResizer('sub')), sc.map(c => colHeader(c)),
         h('th', { class: 'c-add' }, canEdit() ? h('button', { class: 'icon-btn', svg: I.plus, 'aria-label': 'Agregar columna de subtarea', onclick: () => addColumn('sub') }) : null))),
       tbody, foot))));
+}
+const nameW = scope => (S.settings.nameWidths || {})[scope] || (scope === 'sub' ? 260 : 300);
+function nameResizer(scope) {
+  if (!canEdit()) return null;
+  return h('span', { class: 'rz', title: 'Arrastra para cambiar el ancho', ondblclick: () => saveNameW(scope, null), onpointerdown: e => {
+    const x0 = e.clientX, w0 = nameW(scope), els = document.querySelectorAll(`col[data-namew="${scope}"]`); let w = w0;
+    dragPointer(e, ev => { w = Math.max(80, Math.min(700, Math.round(w0 + ev.clientX - x0))); els.forEach(c => c.style.width = w + 'px'); }, () => { if (w !== w0) saveNameW(scope, w); });
+  } });
+}
+async function saveNameW(scope, w) { const nw = { ...(S.settings.nameWidths || {}) }; if (w) nw[scope] = w; else delete nw[scope]; S.settings.nameWidths = nw; render(); await q(sb.from('settings').upsert({ key: 'nameWidths', value: nw })); }
+function addCell(opts, c) {
+  if (!canEdit()) return null;
+  return h('div', { class: 'cell add-cell', tabIndex: 0, title: 'Clic para crear una línea nueva con este dato', onclick: async () => {
+    const row = await createProject({ ...opts, data: { name: opts.parent_id ? 'Nueva subtarea' : 'Nuevo proyecto' } });
+    setTimeout(() => { const el = document.querySelector(`tr[data-id="${row.id}"] [data-key="${c.key}"]`) || document.querySelector(`tr[data-id="${row.id}"] .stars`); if (el) { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); el.click(); } }, 50);
+  } }, '+');
 }
 const rowStyle = p => [p.color ? `--rc:${p.color};--rowbg:${tint(p.color)}` : '', p.height ? `--rh:${p.height}px` : ''].join(';');
 function colorDot(p) {
@@ -343,14 +359,14 @@ function dragPointer(e, move, end) {
 }
 function resizeCol(e, c) {
   const x0 = e.clientX, w0 = c.width, cols = document.querySelectorAll(`col[data-colw="${c.id}"]`); let w = w0;
-  dragPointer(e, ev => { w = Math.max(60, Math.min(900, Math.round(w0 + ev.clientX - x0))); cols.forEach(cl => cl.style.width = w + 'px'); }, () => { if (w !== w0) setColWidth(c, w); });
+  dragPointer(e, ev => { w = Math.max(30, Math.min(900, Math.round(w0 + ev.clientX - x0))); cols.forEach(cl => cl.style.width = w + 'px'); }, () => { if (w !== w0) setColWidth(c, w); });
 }
 async function setColWidth(c, w) { c.width = w; render(); await q(sb.from('columns').update({ width: w }).eq('id', c.id)); }
 function rowResizer(p) {
   if (!canEdit()) return null;
   return h('span', { class: 'rzr', title: 'Arrastra para cambiar el alto · doble clic: alto estándar', ondblclick: () => setRowHeight(p, null), onpointerdown: e => {
     const tr = e.currentTarget.closest('tr'), y0 = e.clientY, h0 = tr.offsetHeight; let hh = h0;
-    dragPointer(e, ev => { hh = Math.max(34, Math.min(400, Math.round(h0 + ev.clientY - y0))); tr.style.setProperty('--rh', hh + 'px'); tr.classList.toggle('tall', hh > 44); }, () => { if (hh !== h0) setRowHeight(p, hh); });
+    dragPointer(e, ev => { hh = Math.max(24, Math.min(400, Math.round(h0 + ev.clientY - y0))); tr.style.setProperty('--rh', hh + 'px'); tr.classList.toggle('tall', hh > 44); }, () => { if (hh !== h0) setRowHeight(p, hh); });
   } });
 }
 async function setRowHeight(p, v) { p.height = v; render(); await q(sb.from('projects').update({ height: v }).eq('id', p.id)); }
@@ -512,7 +528,7 @@ async function addColumn(scope, preset) {
 function colMenu(anchor, c) {
   menu(anchor, [
     { label: 'Renombrar', run: async () => { const r = await ask('Renombrar columna', [{ name: 'label', label: 'Nombre', value: c.label, required: true }]); if (r) { c.label = r.label.trim(); render(); await q(sb.from('columns').update({ label: c.label }).eq('id', c.id)); } } },
-    { label: 'Ancho', run: async () => { const r = await ask('Ancho de columna', [{ name: 'w', label: 'Píxeles (60–600)', type: 'number', value: c.width }]); if (r) { c.width = Math.max(60, Math.min(600, num(r.w) || 150)); render(); await q(sb.from('columns').update({ width: c.width }).eq('id', c.id)); } } },
+    { label: 'Ancho', run: async () => { const r = await ask('Ancho de columna', [{ name: 'w', label: 'Píxeles (30–900)', type: 'number', value: c.width }]); if (r) { c.width = Math.max(30, Math.min(900, num(r.w) || 150)); render(); await q(sb.from('columns').update({ width: c.width }).eq('id', c.id)); } } },
     ['status', 'label'].includes(c.type) && { label: 'Editar etiquetas', run: () => editLabels(c) },
     { label: 'Mover a la izquierda', run: () => moveCol(c, -1) }, { label: 'Mover a la derecha', run: () => moveCol(c, 1) },
     !c.builtin && '-', !c.builtin && { label: 'Eliminar columna', danger: true, run: async () => {
