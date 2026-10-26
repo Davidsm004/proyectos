@@ -367,7 +367,7 @@ function renderGroup(g) {
     pc.map(c => h('td', {}, addCell({ group_id: g.id }, c))), h('td', {})));
   foot.append(sumRow(list, pc));
   return h('section', { class: 'group', 'data-group': g.id, style: `--gc:${g.color}` }, head,
-    h('div', { class: 'tbl-wrap', 'data-scroll': g.id }, h('table', { class: 'board' }, h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { 'data-namew': 'project', style: `width:${nameW('project')}px` }), pc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })), thead, tbody, foot)));
+    h('div', { class: 'tbl-wrap', 'data-scroll': g.id }, h('table', { class: 'board', style: `width:${34 + nameW('project') + pc.reduce((s, c) => s + c.width, 0) + 44}px` }, h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { 'data-namew': 'project', style: `width:${nameW('project')}px` }), pc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })), thead, tbody, foot)));
 }
 function colHeader(c) {
   return h('th', { class: 'dcol', 'data-col': c.id, title: c.label }, h('div', { class: 'th-in' }, h('span', {}, c.label),
@@ -419,7 +419,7 @@ function subRow(p, span) {
     h('input', { placeholder: '+ Agregar subtarea', 'aria-label': 'Agregar subtarea', onkeydown: async e => { if (e.key === 'Enter' && e.target.value.trim()) { const v = e.target.value.trim(); e.target.value = ''; await createProject({ group_id: p.group_id, parent_id: p.id, data: { name: v } }); } } })), sc.map(c => h('td', {}, addCell({ group_id: p.group_id, parent_id: p.id }, c))), h('td', {})));
   if (subs.length) foot.append(sumRow(subs, sc, true));
   return h('tr', { class: 'subwrap', 'data-for': p.id }, h('td', { colSpan: span, style: p.color ? `--rc:${p.color}` : '' },
-    h('div', { class: 'subbox', 'data-scroll': 'sub-' + p.id }, h('table', { class: 'board' },
+    h('div', { class: 'subbox', 'data-scroll': 'sub-' + p.id }, h('table', { class: 'board', style: `width:${34 + nameW('sub') + sc.reduce((s, c) => s + c.width, 0) + 44}px` },
       h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { 'data-namew': 'sub', style: `width:${nameW('sub')}px` }), sc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })),
       h('thead', {}, h('tr', { 'data-scope': 'sub' }, h('th', { class: 'c-drag' }), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Subtarea')), nameResizer('sub')), sc.map(c => colHeader(c)),
         h('th', { class: 'c-add' }, canEdit() ? h('button', { class: 'icon-btn', svg: I.plus, 'aria-label': 'Agregar columna de subtarea', onclick: () => addColumn('sub') }) : null))),
@@ -430,7 +430,7 @@ function nameResizer(scope) {
   if (!canEdit()) return null;
   return h('span', { class: 'rz', title: 'Arrastra para cambiar el ancho', ondblclick: () => saveNameW(scope, null), onpointerdown: e => {
     const x0 = e.clientX, w0 = nameW(scope), els = document.querySelectorAll(`col[data-namew="${scope}"]`); let w = w0;
-    dragPointer(e, ev => { w = Math.max(80, Math.min(700, Math.round(w0 + ev.clientX - x0))); els.forEach(c => c.style.width = w + 'px'); }, () => { if (w !== w0) saveNameW(scope, w); });
+    dragPointer(e, ev => { w = Math.max(80, Math.min(700, Math.round(w0 + ev.clientX - x0))); els.forEach(c => c.style.width = w + 'px'); fitTables(els); }, () => { if (w !== w0) saveNameW(scope, w); });
   } });
 }
 async function saveNameW(scope, w) { const nw = { ...(S.settings.nameWidths || {}) }; if (w) nw[scope] = w; else delete nw[scope]; S.settings.nameWidths = nw; render(); await q(sb.from('settings').upsert({ key: 'nameWidths', value: nw })); }
@@ -446,6 +446,7 @@ function colorDot(p) {
   return h('button', { class: 'cdot', style: `background:${p.color || '#fff'}`, title: 'Color de la línea', 'aria-label': 'Color de la línea', disabled: !canEdit(),
     onclick: e => colorPicker(e.currentTarget, p.color, async c => { p.color = c; render(); await q(sb.from('projects').update({ color: c }).eq('id', p.id)); }) });
 }
+function fitTables(cols) { new Set([...cols].map(c => c.closest('table'))).forEach(t => { if (!t) return; let w = 0; t.querySelectorAll(':scope > colgroup > col').forEach(c => w += parseFloat(c.style.width) || 0); t.style.width = w + 'px'; }); }
 function dragPointer(e, move, end) {
   e.preventDefault(); e.stopPropagation(); const el = e.currentTarget; el.setPointerCapture?.(e.pointerId);
   const mv = ev => move(ev), up = ev => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); end(ev); };
@@ -453,7 +454,7 @@ function dragPointer(e, move, end) {
 }
 function resizeCol(e, c) {
   const x0 = e.clientX, w0 = c.width, cols = document.querySelectorAll(`col[data-colw="${c.id}"]`); let w = w0;
-  dragPointer(e, ev => { w = Math.max(30, Math.min(900, Math.round(w0 + ev.clientX - x0))); cols.forEach(cl => cl.style.width = w + 'px'); }, () => { if (w !== w0) setColWidth(c, w); });
+  dragPointer(e, ev => { w = Math.max(30, Math.min(900, Math.round(w0 + ev.clientX - x0))); cols.forEach(cl => cl.style.width = w + 'px'); fitTables(cols); }, () => { if (w !== w0) setColWidth(c, w); });
 }
 async function setColWidth(c, w) { c.width = w; render(); await q(sb.from('columns').update({ width: w }).eq('id', c.id)); }
 function rowResizer(p) {
