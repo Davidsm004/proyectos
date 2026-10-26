@@ -53,8 +53,9 @@ async function q(p) { const r = await p; if (r.error) { toast(r.error.message ||
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 const cols = scope => S.columns.filter(c => c.scope === scope).sort(byPos);
 const colByKey = (scope, key) => S.columns.find(c => c.scope === scope && c.key === key);
-const subsOf = id => S.projects.filter(p => p.parent_id === id).sort(byPos);
-const topOf = gid => S.projects.filter(p => p.group_id === gid && !p.parent_id).sort(byPos);
+const byUserPos = (a, b) => { const x = num(a.data.pos), y = num(b.data.pos); if (x != null && y != null) return (x - y) || byPos(a, b); if (x != null) return -1; if (y != null) return 1; return byPos(a, b); };
+const subsOf = id => S.projects.filter(p => p.parent_id === id).sort(byUserPos);
+const topOf = gid => S.projects.filter(p => p.group_id === gid && !p.parent_id).sort(byUserPos);
 const findP = id => S.projects.find(p => p.id === id);
 
 /* ---------- cálculos ---------- */
@@ -444,20 +445,22 @@ function addCell(opts, c) {
 const lighten = (hex, f) => '#' + [1, 3, 5].map(i => Math.round(parseInt(hex.substr(i, 2), 16) + (255 - parseInt(hex.substr(i, 2), 16)) * f).toString(16).padStart(2, '0')).join('').toUpperCase();
 const siblings = p => p.parent_id ? subsOf(p.parent_id) : topOf(p.group_id);
 function posEditor(p) {
-  const n = siblings(p).indexOf(p) + 1;
-  const b = h('button', { class: 'pos', title: canEdit() ? 'Posición · clic para cambiarla' : 'Posición', disabled: !canEdit(), onclick: e => {
-    e.stopPropagation(); const total = siblings(p).length;
-    const inp = h('input', { type: 'number', min: 1, max: total, value: n, class: 'pos-in', 'aria-label': 'Nueva posición' });
-    let done = false; const fin = async ok => { if (done) return; done = true; const v = Math.round(num(inp.value)); if (ok && v && v !== n) await setPos(p, v); else render(); };
+  const n = num(p.data.pos);
+  const b = h('button', { class: 'pos' + (n == null ? ' empty' : ''), title: canEdit() ? 'Posición · clic para asignarla' : 'Posición', disabled: !canEdit(), onclick: e => {
+    e.stopPropagation();
+    const inp = h('input', { type: 'number', min: 1, value: n ?? '', class: 'pos-in', 'aria-label': 'Posición' });
+    let done = false; const fin = async ok => { if (done) return; done = true; const v = inp.value.trim() === '' ? null : Math.max(1, Math.round(num(inp.value) || 1)); if (ok && v !== n) await setPos(p, v); else render(); };
     inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') fin(true); if (ev.key === 'Escape') fin(false); }); inp.addEventListener('blur', () => fin(true));
     b.replaceWith(inp); inp.focus(); inp.select();
-  } }, n);
+  } }, n ?? '');
   return b;
 }
-async function setPos(p, n) {
-  const list = siblings(p).filter(x => x !== p); n = Math.max(1, Math.min(list.length + 1, n)); list.splice(n - 1, 0, p);
-  const ups = []; list.forEach((x, i) => { const pos = (i + 1) * 1000; if (x.position !== pos) { x.position = pos; ups.push(q(sb.from('projects').update({ position: pos }).eq('id', x.id))); } });
-  render(); await Promise.all(ups); toast(`Movido a la posición ${n}`, 'ok');
+async function setPos(p, v) { // si el número ya está ocupado, los siguientes se corren uno
+  if (v != null && siblings(p).some(x => x !== p && num(x.data.pos) === v)) {
+    const shift = siblings(p).filter(x => x !== p && num(x.data.pos) != null && num(x.data.pos) >= v).sort((a, b) => num(a.data.pos) - num(b.data.pos));
+    let next = v; for (const x of shift) { if (num(x.data.pos) > next) break; next = num(x.data.pos) + 1; await patch(x, { pos: next }, true); }
+  }
+  await patch(p, { pos: v });
 }
 const rowStyle = p => [p.color ? `--rc:${p.color};--rowbg:${tint(p.color)}` : '', p.height ? `--rh:${p.height}px` : ''].join(';');
 function colorDot(p) {
@@ -945,7 +948,7 @@ async function importExcel(f, updateExisting) {
       for (const [ci, m] of Object.entries(map)) {
         const cell = row.getCell(Number(ci)); let v = cellVal(cell); if (v == null) continue;
         if (m.key === '_level') { level = norm(v); continue; }
-        if (m.key === '_pos') continue;
+        if (m.key === '_pos') { const n = num(v); if (n != null) data.pos = n; continue; }
         const scope = level === 'subtarea' ? 'sub' : 'project', col = colByKey(scope, m.key) || colByKey('project', m.key);
         const t = col?.type;
         if (['money', 'number', 'priority'].includes(t)) v = num(v);
@@ -999,7 +1002,7 @@ async function exportExcel() {
       const row = ws.addRow({}); if (p.height) row.height = Math.round(p.height * 0.75);
       all.forEach((c, i) => {
         const cell = row.getCell(i + 1);
-        let val = c.key === '_pos' ? topOf(g.id).indexOf(p) + 1 : c.key === '_level' ? 'Proyecto' : c.type === 'money' ? moneyOf(p, c.key).v : c.type === 'progress' ? progressOf(p).v : p.data[c.key];
+        let val = c.key === '_pos' ? num(p.data.pos) : c.key === '_level' ? 'Proyecto' : c.type === 'money' ? moneyOf(p, c.key).v : c.type === 'progress' ? progressOf(p).v : p.data[c.key];
         if (p.color) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + p.color.replace('#', '') + '' } };
         setCell(cell, c, val, p, false);
         if (p.color && !['status', 'label'].includes(c.type)) cell.font = { color: { argb: textOn(p.color) === '#fff' ? 'FFFFFFFF' : 'FF2F333C' } };
@@ -1009,7 +1012,7 @@ async function exportExcel() {
         const r2 = ws.addRow({}); r2.outlineLevel = 1; if (s.height) r2.height = Math.round(s.height * 0.75);
         all.forEach((c, i) => {
           const cell = r2.getCell(i + 1);
-          const val = c.key === '_pos' ? subsOf(p.id).indexOf(s) + 1 : c.key === '_level' ? 'Subtarea' : c.key === 'progress' ? subProgress(s) : s.data[c.key];
+          const val = c.key === '_pos' ? num(s.data.pos) : c.key === '_level' ? 'Subtarea' : c.key === 'progress' ? subProgress(s) : s.data[c.key];
           { const sc = s.color || (p.color ? lighten(p.color, .6) : null); if (sc) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + sc.replace('#', '') } }; }
           setCell(cell, c, val, s, true);
           if (c.key === 'name') cell.alignment = { indent: 2 };
