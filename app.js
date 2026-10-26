@@ -516,10 +516,11 @@ function inlineInput(p, c, content, cls, kind) {
     if (d.querySelector('input,textarea')) return;
     const cur = p.data[c.key] ?? '';
     if (kind === 'textarea') {
-      const ta = h('textarea', { class: 'input', value: typeof init === 'string' ? init : cur, style: 'width:min(420px,85vw);min-height:140px', 'aria-label': c.label });
+      const ta = h('textarea', { class: 'input', value: typeof init === 'string' ? init : cur, style: `width:${Math.max(320, Math.min(540, d.offsetWidth + 40))}px`, 'aria-label': c.label });
       pop(d, h('div', { style: 'padding:6px' }, ta, h('div', { style: 'display:flex;justify-content:flex-end;gap:6px;margin-top:6px' },
         h('button', { class: 'btn', onclick: closePop }, 'Cancelar'), h('button', { class: 'btn primary', onclick: async () => { closePop(); if (ta.value !== cur) await patch(p, { [c.key]: ta.value.trim() || null }); } }, 'Guardar'))));
-      ta.focus(); return;
+      popEl.classList.add('wide'); ta.style.height = Math.min(innerHeight * .6, ta.scrollHeight + 6) + 'px'; { const r = d.getBoundingClientRect(), pw = popEl.offsetWidth, ph = popEl.offsetHeight; popEl.style.left = Math.max(8, Math.min(r.left, innerWidth - pw - 8)) + 'px'; let y = r.bottom + 4; if (y + ph > innerHeight - 8) y = Math.max(8, r.top - ph - 4); popEl.style.top = y + 'px'; }
+      ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); return;
     }
     const inp = h('input', { type: kind, value: typeof init === 'string' && kind !== 'date' ? init : cur, step: 'any', 'aria-label': c.label, min: c.type === 'progress' ? 0 : null, max: c.type === 'progress' ? 100 : null });
     let done = false;

@@ -242,3 +242,15 @@ tr.tall .name-cell .nm{white-space:normal}
 
 .board .sel,.board .nm.sel{outline:2px solid var(--blue)!important;outline-offset:-2px;box-shadow:none!important}
 .board .cell:focus,.board .pill:focus,.board .nm:focus{outline:none}
+
+/* Texto ajustado: si no cabe a lo ancho, baja a la siguiente línea y la fila crece */
+.board tbody .cell,.board tbody .name-cell{height:auto;min-height:var(--rh,40px)}
+.board tbody .cell{white-space:normal;overflow:visible;padding-top:6px;padding-bottom:6px;word-break:break-word;align-items:center}
+.board tbody .cell .txt{white-space:normal;overflow:visible;text-overflow:clip;display:block}
+.board tbody .name-cell .nm{white-space:normal;overflow:visible;word-break:break-word}
+.board tbody .pill{height:auto;min-height:var(--rh,40px);white-space:normal;line-height:1.25;padding:4px 6px;text-align:center}
+.board tbody .person{white-space:normal}
+.board tbody td{vertical-align:middle}
+tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
+.pop.wide{max-width:min(560px,calc(100vw - 16px));overflow-x:hidden}
+.pop.wide textarea{width:100%;max-width:100%;resize:vertical;min-height:120px;max-height:60vh;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
