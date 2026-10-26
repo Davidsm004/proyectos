@@ -237,21 +237,7 @@ function createClient(cfg) {
       },
       signOut: async () => { await flush(); sess = null; T = null; clearInterval(poll); try { sessionStorage.removeItem(SKEY); } catch (e) {} authCbs.forEach(f => f('SIGNED_OUT', null)); return { error: null }; },
       profile: () => sess && { id: sess.id, email: sess.usuario, role: sess.rol },
-      // Configuración inicial: crea rama de datos, llaves y el primer administrador.
-      setup: async ({ usuario, password, token }) => {
-        usuario = usuario.trim().toLowerCase();
-        await gh.ensureBranch(token);
-        if (await readUsers(token)) throw new Error('La plataforma ya estaba configurada');
-        const Kraw = rnd(32), Wraw = rnd(32), K = await aesKey(Kraw), W = await aesKey(Wraw);
-        const doc = { v: 1, pepper: tob64(rnd(16)), iter: ITER, entries: [], fecha: now() };
-        const e = await makeEntry(doc, usuario, password, 'admin', Kraw, Wraw); doc.entries.push(e);
-        doc.dir = await seal(K, [{ id: e.id, usuario, rol: 'admin', creado: now() }]); doc.gh = await seal(W, token);
-        sess = { usuario, id: e.id, rol: 'admin', K, Kraw: tob64(Kraw), Wraw: tob64(Wraw), token };
-        if (!(await readData()).sha) { const w = await writeData(emptyDb(), null, 'Datos iniciales'); if (w.conflict) throw new Error('Conflicto inicial'); }
-        const r = await gh.put(USERS, tob64(enc.encode(JSON.stringify(doc))), null, token, 'Usuarios iniciales'); if (r.conflict) throw new Error('La plataforma ya estaba configurada');
-        sess = null;
-        return { error: null };
-      }
+      hasToken: () => !!(sess && sess.token),
     },
     users: {
       list: async () => { const u = await readUsers(sess.token); return open(sess.K, u.doc.dir); },
@@ -273,7 +259,10 @@ function createClient(cfg) {
           try { await dec1(kek0, e.k); } catch (x) { throw new Error('La contraseña actual no es correcta'); }
           const n = await makeEntry(doc, sess.usuario, newPass, sess.rol, b64(sess.Kraw), b64(sess.Wraw)); Object.assign(e, n); if (!n.w) delete e.w; }, 'Usuarios: contraseña');
       },
-      setToken: async token => { needAdmin(); const W = await aesKey(b64(sess.Wraw)); sess.token = token; store(); return changeUsers(async doc => { doc.gh = await seal(W, token); }, 'Token actualizado'); }
+      setToken: async token => { if (!sess || sess.rol !== 'admin') throw new Error('Solo un administrador puede actualizar el token');
+        const W = await aesKey(b64(sess.Wraw)), prev = sess.token; sess.token = token;
+        try { const d = await changeUsers(async doc => { doc.gh = await seal(W, token); }, 'Token actualizado'); store(); startPoll(); return d; }
+        catch (e) { sess.token = prev; throw new Error(e.code === 'token' || /token/i.test(e.message) ? 'Ese token no funciona: revisa que tenga acceso a proyectos con Contents: Read and write' : e.message); } }
     },
     storage: { from: () => ({
       upload: async (path, file) => {

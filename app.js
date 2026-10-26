@@ -144,7 +144,7 @@ function colorPicker(anchor, cur, cb) {
 async function boot() {
   sb = window.GHDB.createClient({ ...CFG, columns: window.LPP_COLUMNS, onError: m => toast(m, 'err') });
   sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; S.view = 'board'; renderLogin(); } });
-  if (await sb.status() === 'setup') return renderSetup();
+  if (await sb.status() === 'setup') return $('#app').replaceChildren(h('div', { class: 'empty-state' }, h('img', { src: 'logo.png', alt: 'Liberty', style: 'height:28px' }), h('h2', {}, 'Plataforma no disponible'), h('p', {}, 'Contacta al administrador.')));
   const { data } = await sb.auth.getSession();
   if (data?.session) await enter(data.session.user); else renderLogin();
 }
@@ -154,23 +154,6 @@ function authLayout(title, sub, form, foot) {
       h('div', { style: 'position:relative;z-index:1' }, h('h1', {}, 'Liberty Project Pipeline'), h('p', {}, 'Prioriza, da seguimiento y mide el retorno de cada iniciativa en un solo lugar.')),
       h('small', { style: 'opacity:.8;position:relative;z-index:1' }, 'Liberty Costa Rica')),
     h('section', { class: 'auth-form' }, h('div', { class: 'auth-card' }, h('h2', {}, title), h('p', { class: 'muted' }, sub), form, foot || null))));
-}
-function renderSetup() {
-  const f = (id, label, type, extra) => h('div', { class: 'field' }, h('label', { for: id }, label), h('input', { class: 'input', id, type, required: true, ...extra }));
-  const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Configurar plataforma');
-  const form = h('form', { onsubmit: async e => {
-    e.preventDefault(); const u = $('#su-user').value.trim(), p1 = $('#su-pass').value, p2 = $('#su-pass2').value, tk = $('#su-token').value.trim();
-    if (!/^[a-z0-9._-]{3,40}$/i.test(u)) return toast('Usuario: 3–40 caracteres (letras, números, punto, guion)', 'err');
-    if (p1.length < 10) return toast('La contraseña debe tener al menos 10 caracteres', 'err');
-    if (p1 !== p2) return toast('Las contraseñas no coinciden', 'err');
-    btn.disabled = true; btn.textContent = 'Configurando…';
-    try { await sb.auth.setup({ usuario: u, password: p1, token: tk }); toast('Plataforma configurada. Ingresa con tu usuario.', 'ok'); renderLogin(); }
-    catch (err) { toast(err.message, 'err'); btn.disabled = false; btn.textContent = 'Configurar plataforma'; }
-  } },
-    f('su-user', 'Usuario administrador', 'text', { autocomplete: 'username' }), f('su-pass', 'Contraseña (mín. 10)', 'password', { autocomplete: 'new-password' }), f('su-pass2', 'Repetir contraseña', 'password', { autocomplete: 'new-password' }),
-    f('su-token', 'Token de GitHub (permiso Contents: Read and write sobre ' + CFG.owner + '/' + CFG.repo + ')', 'password', { autocomplete: 'off', placeholder: 'github_pat_…' }), btn);
-  authLayout('Configuración inicial', 'Solo se hace una vez. Los datos se guardan cifrados en la rama «' + (CFG.branch || 'datos') + '» del repositorio; el token queda cifrado y solo lo usan administradores y editores.', form,
-    h('p', { class: 'muted', style: 'margin-top:14px' }, 'Crea el token en ', h('a', { href: 'https://github.com/settings/personal-access-tokens/new', target: '_blank', rel: 'noopener' }, 'github.com/settings/personal-access-tokens'), ': Repository access → Only select → ' + CFG.repo + '; Permissions → Contents: Read and write.'));
 }
 function renderLogin() {
   const user = h('input', { class: 'input', type: 'text', autocomplete: 'username', required: true, id: 'email', autocapitalize: 'none' });
@@ -187,6 +170,10 @@ function renderLogin() {
 async function enter(user) {
   S.user = user; S.profile = sb.auth.profile();
   await loadAll(); renderShell(); subscribe();
+  if (canEdit() && !sb.auth.hasToken()) {
+    if (isAdmin()) { await tokenModal(true); } else toast('Modo solo lectura: el administrador debe activar el guardado', 'err');
+    if (!sb.auth.hasToken()) S.profile = { ...S.profile, role: 'viewer' }; renderShell();
+  }
   if (!S.projects.length && canEdit()) { S.view = 'new'; renderShell(); toast('Importa tu Excel de proyectos para comenzar', 'ok'); }
 }
 async function loadAll() {
@@ -847,12 +834,11 @@ async function usersModal() {
       u.id !== S.user.id ? h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Eliminar ' + u.usuario, onclick: async () => {
         if (!await confirmBox('Eliminar usuario', `¿Quitar el acceso de "${u.usuario}"?`)) return;
         try { await sb.users.remove(u.id); toast('Usuario eliminado', 'ok'); close(); usersModal(); } catch (err) { toast(err.message, 'err'); } } }) : null))),
-    [{ label: '+ Nuevo usuario', cls: 'primary', run: c => { c(); userForm(); } }]);
+    []);
 }
 async function userForm(u) {
   const r = await ask(u ? 'Restablecer contraseña · ' + u.usuario : 'Nuevo usuario', [
-    u ? null : { name: 'usuario', label: 'Usuario', required: true },
-    { name: 'password', label: 'Contraseña (mín. 10)', type: 'password', required: true },
+        { name: 'password', label: 'Contraseña (mín. 10)', type: 'password', required: true },
     { name: 'rol', label: 'Rol', type: 'select', value: u ? u.rol : 'editor', options: ROLES.map(([value, label]) => ({ value, label })) }].filter(Boolean), 'Guardar');
   if (!r) return;
   const usuario = u ? u.usuario : r.usuario.trim();
@@ -865,9 +851,9 @@ async function passwordModal() {
   if (!r) return; if (r.n1.length < 10 || r.n1 !== r.n2) return toast('La nueva contraseña no coincide o es muy corta', 'err');
   try { await sb.users.changePassword(r.old, r.n1); toast('Contraseña actualizada', 'ok'); } catch (e) { toast(e.message, 'err'); }
 }
-async function tokenModal() {
-  const r = await ask('Actualizar token de GitHub', [{ name: 't', label: 'Nuevo token (Contents: Read and write)', type: 'password', required: true }]);
-  if (!r) return; try { await sb.users.setToken(r.t.trim()); toast('Token actualizado', 'ok'); } catch (e) { toast(e.message, 'err'); }
+async function tokenModal(first) {
+  const r = await ask(first ? 'Activar guardado (solo una vez)' : 'Actualizar token de GitHub', [{ name: 't', label: first ? 'Pega el token de GitHub (github_pat_…) para que la plataforma pueda guardar. No se vuelve a pedir.' : 'Nuevo token (Contents: Read and write)', type: 'password', required: true, placeholder: 'github_pat_…' }], 'Activar');
+  if (!r) return; try { await sb.users.setToken(r.t.trim()); S.profile = sb.auth.profile(); toast('Guardado activado', 'ok'); } catch (e) { toast(e.message, 'err'); }
 }
 
 window.addEventListener('DOMContentLoaded', () => boot().catch(e => { console.error(e); toast(e.message || 'Error al iniciar', 'err'); }));
