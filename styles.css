@@ -89,7 +89,7 @@ main{flex:1;padding:24px;max-width:100%;min-width:0}
 .group-head .gname:hover{background:#fff}
 .group-head .count{font-size:12px;color:var(--g600)}
 .tbl-wrap{overflow-x:auto;background:#fff;border-radius:var(--r);box-shadow:var(--shadow);border-left:6px solid var(--gc);-webkit-overflow-scrolling:touch}
-table.board{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;table-layout:fixed}
+table.board{border-collapse:separate;border-spacing:0;width:max-content;table-layout:fixed}
 .board th,.board td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);height:40px;padding:0;font-size:13px;vertical-align:middle;background:var(--rowbg,#fff)}
 .board th{background:#FAFAFC;color:var(--g700);font-weight:600;font-size:12px;text-align:center;position:relative;user-select:none}
 .board th .th-in{display:flex;align-items:center;justify-content:center;gap:4px;padding:0 6px;height:40px}
@@ -232,3 +232,10 @@ tr.tall .name-cell .nm{white-space:normal}
 .cell{padding:0 8px}
 .add-cell{color:var(--g500);justify-content:center;font-weight:600}
 .add-cell:hover{background:rgba(0,128,232,.06);color:var(--blue)}
+
+.board th,.board td,.board .pill,.board .cell input,.board .cell textarea,.board .name-cell .input{font-size:var(--fs,13px)}
+.board th{font-size:calc(var(--fs,13px) - 1px)}
+.fs-ctl{display:inline-flex;border:1px solid var(--g400);border-radius:8px;overflow:hidden}
+.fs-ctl button{border:0;background:#fff;padding:7px 10px;font-weight:700}
+.fs-ctl button:hover{background:var(--g100)}
+.fs-ctl span{padding:7px 6px;font-size:12px;color:var(--g700);border-left:1px solid var(--g400);border-right:1px solid var(--g400)}

@@ -218,6 +218,12 @@ function render() {
   m.querySelectorAll('[data-scroll]').forEach(el => { if (keep[el.dataset.scroll]) el.scrollLeft = keep[el.dataset.scroll]; });
 }
 
+/* ---------- tamaño de letra (por usuario/navegador) ---------- */
+function getFs() { try { return Number(localStorage.getItem('lpp-fs')) || 13; } catch (e) { return 13; } }
+function applyFs() { document.documentElement.style.setProperty('--fs', getFs() + 'px'); }
+function setFs(d) { const v = Math.max(8, Math.min(18, getFs() + d)); try { localStorage.setItem('lpp-fs', v); } catch (e) {} applyFs(); const el = $('#fs-val'); if (el) el.textContent = v + 'px'; }
+applyFs();
+
 /* ---------- vista tablero ---------- */
 function renderBoard(m) {
   const all = S.groups.flatMap(g => visibleTop(g.id));
@@ -243,6 +249,7 @@ function renderBoard(m) {
     h('div', { class: 'search' }, h('span', { svg: I.search }), search),
     sel('status', 'Estatus', statusOpts.map(o => o.label)), sel('area', 'Área', areaOpts.map(o => o.label)), sel('person', 'Persona', persons),
     (S.q || S.f.status || S.f.area || S.f.person) ? h('button', { class: 'btn ghost', onclick: () => { S.q = ''; S.f = { status: '', area: '', person: '' }; render(); } }, 'Limpiar') : null,
+    h('div', { class: 'fs-ctl', title: 'Tamaño de letra de la tabla' }, h('button', { 'aria-label': 'Letra más pequeña', onclick: () => setFs(-1) }, 'A−'), h('span', { id: 'fs-val' }, getFs() + 'px'), h('button', { 'aria-label': 'Letra más grande', onclick: () => setFs(1) }, 'A+')),
     h('div', { class: 'sep' }),
     canEdit() ? h('button', { class: 'btn', id: 'btn-group', onclick: addGroup }, '+ Grupo') : null,
     canEdit() ? h('button', { class: 'btn', onclick: importExcelModal }, h('span', { svg: I.up }), 'Importar') : null,
