@@ -77,7 +77,7 @@ function visibleTop(gid) {
   return topOf(gid).filter(p => {
     if (f.status && norm(p.data.status) !== norm(f.status)) return false;
     if (f.area && norm(p.data.area) !== norm(f.area)) return false;
-    if (f.person && ![p, ...subsOf(p.id)].some(x => ['encargado', 'responsable', 'pmo'].some(k => norm(x.data[k]).includes(norm(f.person))))) return false;
+    if (f.person && ![p, ...subsOf(p.id)].some(x => S.columns.filter(c => c.type === 'person').some(c => personsOf(x.data[c.key]).some(n => norm(n) === norm(f.person))))) return false;
     if (!qq) return true;
     return [p, ...subsOf(p.id)].some(x => Object.values(x.data).some(v => norm(v).includes(qq)));
   });
@@ -326,7 +326,7 @@ function renderBoard(m) {
     h('div', { class: 'kpi r' }, h('div', { class: 'l' }, 'Faltante para la meta'), h('div', { class: 'v', id: 'k-falta', style: meta?.value != null && t.ret >= meta.value ? 'color:var(--green)' : '' }, meta?.value != null ? fmtMoney(Math.max(0, meta.value - t.ret)) : '—'),
       h('div', { class: 's' }, meta?.value != null ? (t.ret >= meta.value ? 'Meta alcanzada' : Math.round(t.ret / meta.value * 100) + '% alcanzado') : 'Define la meta'), meta?.value ? h('div', { class: 'bar' }, h('i', { style: `width:${Math.min(100, t.ret / meta.value * 100)}%;background:var(--orange)` })) : null));
   const statusOpts = colByKey('project', 'status')?.options || [], areaOpts = colByKey('project', 'area')?.options || [];
-  const persons = [...new Set(S.projects.flatMap(p => ['encargado', 'responsable', 'pmo'].flatMap(k => String(p.data[k] || '').split(/\s*[\/,]\s*|\s+y\s+/))).map(s => s.trim()).filter(Boolean))].sort();
+  const persons = allPersons();
   const search = h('input', { class: 'input', type: 'search', id: 'q', placeholder: 'Buscar proyectos, IDs, personas…', value: S.q, 'aria-label': 'Buscar',
     oninput: e => { S.q = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
   const sel = (key, label, opts) => h('select', { class: 'input', id: 'f-' + key, 'aria-label': label, onchange: e => { S.f[key] = e.target.value; render(); } },
@@ -504,7 +504,12 @@ function cellView(p, c, isSub) {
     case 'date': return inlineInput(p, c, h('span', { class: 'txt' }, v ? new Date(v + 'T00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }) : ''), 'center', 'date');
     case 'priority': return h('div', { class: 'cell ro', 'data-key': c.key, tabIndex: 0, onclick: e => selectCell(e.currentTarget) }, h('div', { class: 'stars', role: 'radiogroup', 'aria-label': 'Prioridad' }, [1, 2, 3, 4, 5].map(n => h('button', { class: n <= (num(v) || 0) ? 'on' : '', 'aria-label': n + ' de 5', disabled: ro, onclick: () => patch(p, { [c.key]: num(v) === n ? null : n }) }, '★'))));
     case 'checkbox': return h('div', { class: 'cell center ro', 'data-key': c.key, tabIndex: 0, onclick: e => selectCell(e.currentTarget) }, h('input', { type: 'checkbox', checked: !!v, disabled: ro, 'aria-label': c.label, onchange: e => patch(p, { [c.key]: e.target.checked }) }));
-    case 'person': return inlineInput(p, c, v ? h('span', { class: 'person' }, h('span', { class: 'avatar', style: `background:${hashColor(v)}` }, initials(v)), h('span', { class: 'txt' }, v)) : '', '', 'text');
+    case 'person': {
+      const d = h('div', { class: 'cell' + (ro ? ' ro' : ''), tabIndex: 0, 'data-key': c.key, title: v || '' }, h('div', { class: 'tags' }, personsOf(v).map(n => h('span', { class: 'tag', style: `--tc:${hashColor(n)}` }, h('i', {}, initials(n)), n))));
+      if (!ro) { d._start = () => personPicker(d, p, c); d.addEventListener('click', () => d.classList.contains('sel') ? d._start() : selectCell(d)); d.addEventListener('dblclick', () => d._start()); }
+      else d.addEventListener('click', () => selectCell(d));
+      return d;
+    }
     case 'longtext': return inlineInput(p, c, h('span', { class: 'txt' }, v || ''), '', 'textarea');
     default: return inlineInput(p, c, h('span', { class: 'txt' }, v ?? ''), '', 'text');
   }
@@ -539,6 +544,24 @@ function inlineInput(p, c, content, cls, kind) {
   d._start = ch => { init = ch; start(); };
   d.addEventListener('click', e => { if (d.querySelector('input')) return; d.classList.contains('sel') ? start() : selectCell(d); }); d.addEventListener('dblclick', () => start());
   return d;
+}
+const personsOf = v => String(v || '').split(/\s*[\/,;]\s*|\s+y\s+/).map(s => s.trim()).filter(Boolean);
+const allPersons = () => [...new Set(S.projects.flatMap(p => S.columns.filter(c => c.type === 'person').flatMap(c => personsOf(p.data[c.key]))))].sort((a, b) => a.localeCompare(b, 'es'));
+function personPicker(anchor, p, c) {
+  let names = personsOf(p.data[c.key]);
+  const save = () => patch(p, { [c.key]: names.length ? names.join(', ') : null });
+  const box = h('div', { style: 'padding:6px;width:min(320px,85vw)' });
+  const draw = () => {
+    const inp = h('input', { class: 'input', list: 'lpp-persons', placeholder: 'Escribe un nombre y Enter', 'aria-label': 'Agregar persona',
+      onkeydown: e => { if (e.key === 'Enter' && inp.value.trim()) { e.preventDefault(); const n = inp.value.trim(); if (!names.some(x => norm(x) === norm(n))) names.push(n); save(); draw(); } if (e.key === 'Escape') closePop(); } });
+    inp.setAttribute('list', 'lpp-persons');
+    box.replaceChildren(h('div', { class: 'tags', style: 'margin-bottom:8px;min-height:24px' }, names.length ? names.map((n, i) => h('span', { class: 'tag', style: `--tc:${hashColor(n)}` }, h('i', {}, initials(n)), n,
+      h('button', { 'aria-label': 'Quitar ' + n, onclick: () => { names.splice(i, 1); save(); draw(); } }, '×'))) : h('span', { class: 'muted' }, 'Sin personas')),
+      inp, h('datalist', { id: 'lpp-persons' }, allPersons().filter(n => !names.includes(n)).map(n => h('option', { value: n }))),
+      h('div', { style: 'display:flex;justify-content:flex-end;margin-top:8px' }, h('button', { class: 'btn primary', onclick: closePop }, 'Listo')));
+    setTimeout(() => inp.focus(), 0);
+  };
+  pop(anchor, box); draw();
 }
 function statusPicker(anchor, p, c) {
   pop(anchor, h('div', { class: 'opt-list' },
