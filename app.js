@@ -156,9 +156,10 @@ function authLayout(title, sub, form, foot) {
     h('section', { class: 'auth-form' }, h('div', { class: 'auth-card' }, h('h2', {}, title), h('p', { class: 'muted' }, sub), form, foot || null))));
 }
 function renderLogin() {
-  const user = h('input', { class: 'input', type: 'text', autocomplete: 'off', name: 'lpp-u', required: true, id: 'email', autocapitalize: 'none', spellcheck: false, readOnly: true, onfocus: e => e.target.removeAttribute('readonly') });
-  const pass = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', name: 'lpp-p', required: true, id: 'password', readOnly: true, onfocus: e => e.target.removeAttribute('readonly') });
-  setTimeout(() => { user.value = ''; pass.value = ''; }, 300);
+  const user = h('input', { class: 'input', type: 'text', autocomplete: 'off', name: 'lpp-u', required: true, id: 'email', autocapitalize: 'none', spellcheck: false});
+  const pass = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', name: 'lpp-p', required: true, id: 'password'});
+  let typed = false; [user, pass].forEach(i => i.addEventListener('input', e => { if (e.isTrusted !== false) typed = true; }));
+  setTimeout(() => { if (!typed) { user.value = ''; pass.value = ''; } }, 400);
   const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Ingresar');
   const form = h('form', { autocomplete: 'off', onsubmit: async e => {
     e.preventDefault(); btn.disabled = true; btn.textContent = 'Verificando…';
@@ -228,7 +229,9 @@ function renderBoard(m) {
     h('div', { class: 'kpi p' }, h('div', { class: 'l' }, 'Avance promedio'), h('div', { class: 'v', id: 'k-prog' }, Math.round(t.prog) + '%'), h('div', { class: 'bar' }, h('i', { style: `width:${t.prog}%` }))),
     h('div', { class: 'kpi r' + (canEdit() ? ' click' : ''), title: canEdit() ? 'Editar meta' : '', onclick: canEdit() ? editMeta : null },
       h('div', { class: 'l' }, meta?.label || 'Meta'), h('div', { class: 'v' }, meta?.value != null ? fmtMoney(meta.value) : '—'),
-      h('div', { class: 's' }, meta?.value != null ? (t.ret >= meta.value ? 'Meta alcanzada' : 'Faltan ' + fmtMoney(meta.value - t.ret)) : 'Sin meta definida')));
+      h('div', { class: 's' }, meta?.value != null ? 'Clic para editar' : 'Sin meta definida')),
+    h('div', { class: 'kpi r' }, h('div', { class: 'l' }, 'Faltante para la meta'), h('div', { class: 'v', id: 'k-falta', style: meta?.value != null && t.ret >= meta.value ? 'color:var(--green)' : '' }, meta?.value != null ? fmtMoney(Math.max(0, meta.value - t.ret)) : '—'),
+      h('div', { class: 's' }, meta?.value != null ? (t.ret >= meta.value ? 'Meta alcanzada' : Math.round(t.ret / meta.value * 100) + '% alcanzado') : 'Define la meta'), meta?.value ? h('div', { class: 'bar' }, h('i', { style: `width:${Math.min(100, t.ret / meta.value * 100)}%;background:var(--orange)` })) : null));
   const statusOpts = colByKey('project', 'status')?.options || [], areaOpts = colByKey('project', 'area')?.options || [];
   const persons = [...new Set(S.projects.flatMap(p => ['encargado', 'responsable', 'pmo'].flatMap(k => String(p.data[k] || '').split(/\s*[\/,]\s*|\s+y\s+/))).map(s => s.trim()).filter(Boolean))].sort();
   const search = h('input', { class: 'input', type: 'search', id: 'q', placeholder: 'Buscar proyectos, IDs, personas…', value: S.q, 'aria-label': 'Buscar',
@@ -270,11 +273,12 @@ function renderGroup(g) {
     h('td', { colSpan: pc.length + 1 })));
   foot.append(sumRow(list, pc));
   return h('section', { class: 'group', 'data-group': g.id, style: `--gc:${g.color}` }, head,
-    h('div', { class: 'tbl-wrap', 'data-scroll': g.id }, h('table', { class: 'board' }, h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { style: 'width:300px' }), pc.map(c => h('col', { style: `width:${c.width}px` })), h('col', { style: 'width:44px' })), thead, tbody, foot)));
+    h('div', { class: 'tbl-wrap', 'data-scroll': g.id }, h('table', { class: 'board' }, h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { style: 'width:300px' }), pc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })), thead, tbody, foot)));
 }
 function colHeader(c) {
   return h('th', { class: 'dcol', 'data-col': c.id, title: c.label }, h('div', { class: 'th-in' }, h('span', {}, c.label),
-    canEdit() ? h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones de columna ' + c.label, onclick: e => { e.stopPropagation(); colMenu(e.currentTarget, c); } }) : null));
+    canEdit() ? h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones de columna ' + c.label, onclick: e => { e.stopPropagation(); colMenu(e.currentTarget, c); } }) : null),
+    canEdit() ? h('span', { class: 'rz', title: 'Arrastra para cambiar el ancho · doble clic: ancho estándar', onpointerdown: e => resizeCol(e, c), ondblclick: () => setColWidth(c, 150) }) : null);
 }
 function sumRow(list, pc, isSub) {
   return h('tr', { class: 'sum-row' }, h('td', { class: 'c-drag' }), h('td', { class: 'c-name' }, h('div', { class: 'cell ro muted' }, isSub ? 'Totales' : 'Totales del grupo')),
@@ -295,11 +299,11 @@ const progBar = (v, calc) => h('div', { class: 'prog' + (calc ? ' calc' : ''), t
 function projectRow(p, pc) {
   const subs = subsOf(p.id), open = S.open.has(p.id);
   const nC = S.comments.filter(c => c.project_id === p.id).length, nF = S.attachments.filter(a => a.project_id === p.id).length;
-  const tr = h('tr', { class: 'prow', 'data-id': p.id, style: p.color ? `--rc:${p.color};--rowbg:${tint(p.color)}` : '' });
-  tr.append(h('td', { class: 'c-drag' }, canEdit() ? h('span', { class: 'drag', svg: I.grip, title: 'Arrastrar' }) : null),
+  const tr = h('tr', { class: 'prow' + (p.height > 44 ? ' tall' : ''), 'data-id': p.id, style: rowStyle(p) });
+  tr.append(h('td', { class: 'c-drag' }, canEdit() ? h('span', { class: 'drag', svg: I.grip, title: 'Arrastrar' }) : null, rowResizer(p)),
     h('td', { class: 'c-name' }, h('div', { class: 'name-cell' },
       h('button', { class: 'icon-btn', 'aria-label': open ? 'Ocultar subtareas' : 'Ver subtareas', 'aria-expanded': String(open), onclick: () => { open ? S.open.delete(p.id) : S.open.add(p.id); render(); } }, h('span', { class: 'caret' + (open ? ' open' : ''), style: 'display:inline-grid', svg: I.caret })),
-      nameEditor(p), subs.length ? h('span', { class: 'subcount', title: 'Subtareas' }, subs.length) : null,
+      colorDot(p), nameEditor(p), subs.length ? h('span', { class: 'subcount', title: 'Subtareas' }, subs.length) : null,
       h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Comentarios', title: 'Comentarios e historial', onclick: () => openDrawer(p.id, 'comments') }, h('span', { svg: I.chat }), nC ? h('b', {}, nC) : null),
       h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Archivos', title: 'Archivos', onclick: () => openDrawer(p.id, 'files') }, h('span', { svg: I.clip }), nF ? h('b', {}, nF) : null),
       h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Acciones del proyecto', onclick: e => rowMenu(e.currentTarget, p) }))),
@@ -309,9 +313,9 @@ function projectRow(p, pc) {
 function subRow(p, span) {
   const sc = cols('sub'), subs = subsOf(p.id);
   const tbody = h('tbody', { 'data-parent': p.id });
-  subs.forEach(s => tbody.append(h('tr', { class: 'srow', 'data-id': s.id, style: s.color ? `--rc:${s.color};--rowbg:${tint(s.color)}` : '' },
-    h('td', { class: 'c-drag' }, canEdit() ? h('span', { class: 'drag', svg: I.grip }) : null),
-    h('td', { class: 'c-name' }, h('div', { class: 'name-cell' }, nameEditor(s),
+  subs.forEach(s => tbody.append(h('tr', { class: 'srow' + (s.height > 44 ? ' tall' : ''), 'data-id': s.id, style: rowStyle(s) },
+    h('td', { class: 'c-drag' }, canEdit() ? h('span', { class: 'drag', svg: I.grip }) : null, rowResizer(s)),
+    h('td', { class: 'c-name' }, h('div', { class: 'name-cell' }, colorDot(s), nameEditor(s),
       h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Comentarios', onclick: () => openDrawer(s.id, 'comments') }, h('span', { svg: I.chat }), S.comments.some(c => c.project_id === s.id) ? h('b', {}, S.comments.filter(c => c.project_id === s.id).length) : null),
       h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Archivos', onclick: () => openDrawer(s.id, 'files') }, h('span', { svg: I.clip }), S.attachments.some(a => a.project_id === s.id) ? h('b', {}, S.attachments.filter(a => a.project_id === s.id).length) : null),
       h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Acciones de subtarea', onclick: e => rowMenu(e.currentTarget, s) }))),
@@ -322,11 +326,34 @@ function subRow(p, span) {
   if (subs.length) foot.append(sumRow(subs, sc, true));
   return h('tr', { class: 'subwrap', 'data-for': p.id }, h('td', { colSpan: span, style: p.color ? `--rc:${p.color}` : '' },
     h('div', { class: 'subbox', 'data-scroll': 'sub-' + p.id }, h('table', { class: 'board' },
-      h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { style: 'width:260px' }), sc.map(c => h('col', { style: `width:${c.width}px` })), h('col', { style: 'width:44px' })),
+      h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { style: 'width:260px' }), sc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })),
       h('thead', {}, h('tr', { 'data-scope': 'sub' }, h('th', { class: 'c-drag' }), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Subtarea'))), sc.map(c => colHeader(c)),
         h('th', { class: 'c-add' }, canEdit() ? h('button', { class: 'icon-btn', svg: I.plus, 'aria-label': 'Agregar columna de subtarea', onclick: () => addColumn('sub') }) : null))),
       tbody, foot))));
 }
+const rowStyle = p => [p.color ? `--rc:${p.color};--rowbg:${tint(p.color)}` : '', p.height ? `--rh:${p.height}px` : ''].join(';');
+function colorDot(p) {
+  return h('button', { class: 'cdot', style: `background:${p.color || '#fff'}`, title: 'Color de la línea', 'aria-label': 'Color de la línea', disabled: !canEdit(),
+    onclick: e => colorPicker(e.currentTarget, p.color, async c => { p.color = c; render(); await q(sb.from('projects').update({ color: c }).eq('id', p.id)); }) });
+}
+function dragPointer(e, move, end) {
+  e.preventDefault(); e.stopPropagation(); const el = e.currentTarget; el.setPointerCapture?.(e.pointerId);
+  const mv = ev => move(ev), up = ev => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); end(ev); };
+  el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up);
+}
+function resizeCol(e, c) {
+  const x0 = e.clientX, w0 = c.width, cols = document.querySelectorAll(`col[data-colw="${c.id}"]`); let w = w0;
+  dragPointer(e, ev => { w = Math.max(60, Math.min(900, Math.round(w0 + ev.clientX - x0))); cols.forEach(cl => cl.style.width = w + 'px'); }, () => { if (w !== w0) setColWidth(c, w); });
+}
+async function setColWidth(c, w) { c.width = w; render(); await q(sb.from('columns').update({ width: w }).eq('id', c.id)); }
+function rowResizer(p) {
+  if (!canEdit()) return null;
+  return h('span', { class: 'rzr', title: 'Arrastra para cambiar el alto · doble clic: alto estándar', ondblclick: () => setRowHeight(p, null), onpointerdown: e => {
+    const tr = e.currentTarget.closest('tr'), y0 = e.clientY, h0 = tr.offsetHeight; let hh = h0;
+    dragPointer(e, ev => { hh = Math.max(34, Math.min(400, Math.round(h0 + ev.clientY - y0))); tr.style.setProperty('--rh', hh + 'px'); tr.classList.toggle('tall', hh > 44); }, () => { if (hh !== h0) setRowHeight(p, hh); });
+  } });
+}
+async function setRowHeight(p, v) { p.height = v; render(); await q(sb.from('projects').update({ height: v }).eq('id', p.id)); }
 function nameEditor(p) {
   const sp = h('span', { class: 'nm', tabIndex: 0, title: p.data.name || '' }, p.data.name || 'Sin nombre');
   if (!canEdit()) return sp;
@@ -438,7 +465,7 @@ async function removeProject(p) {
 }
 function rowMenu(anchor, p) {
   menu(anchor, [
-    { label: 'Abrir comentarios', run: () => openDrawer(p.id, 'comments') }, { label: 'Archivos adjuntos', run: () => openDrawer(p.id, 'files') }, { label: 'Historial de cambios', run: () => openDrawer(p.id, 'history') },
+    { label: 'Editar detalles', run: () => openDrawer(p.id, 'details') }, { label: 'Abrir comentarios', run: () => openDrawer(p.id, 'comments') }, { label: 'Archivos adjuntos', run: () => openDrawer(p.id, 'files') }, { label: 'Historial de cambios', run: () => openDrawer(p.id, 'history') },
     canEdit() && '-',
     canEdit() && !p.parent_id && { label: 'Agregar subtarea', run: async () => { const r = await ask('Nueva subtarea', [{ name: 'name', label: 'Nombre', required: true }]); if (r) await createProject({ group_id: p.group_id, parent_id: p.id, data: { name: r.name.trim() } }); } },
     canEdit() && { label: 'Duplicar', run: () => duplicate(p) },
@@ -516,7 +543,7 @@ function setupSortables(root) {
   if (!canEdit() || !window.Sortable) return;
   root.querySelectorAll('tbody[data-group]').forEach(tb => Sortable.create(tb, { group: 'rows', handle: '.drag', draggable: 'tr.prow', animation: 150, onStart: () => closePop(), onEnd: e => onRowsDrop(e) }));
   root.querySelectorAll('tbody[data-parent]').forEach(tb => Sortable.create(tb, { handle: '.drag', draggable: 'tr.srow', animation: 150, onEnd: e => onSubDrop(e.to) }));
-  root.querySelectorAll('thead tr[data-scope]').forEach(tr => Sortable.create(tr, { draggable: 'th.dcol', filter: 'button', preventOnFilter: false, animation: 150, onEnd: e => {
+  root.querySelectorAll('thead tr[data-scope]').forEach(tr => Sortable.create(tr, { draggable: 'th.dcol', filter: 'button,.rz', preventOnFilter: false, animation: 150, onEnd: e => {
     const ids = [...e.to.querySelectorAll('th.dcol')].map(th => th.dataset.col); const list = ids.map(id => S.columns.find(c => c.id === id)).filter(Boolean);
     if (e.oldIndex !== e.newIndex) saveColOrder(list);
   } }));
@@ -545,14 +572,34 @@ function openDrawer(id, tab = 'comments') {
   document.querySelector('.drawer')?.remove();
   const p = findP(id); if (!p) return;
   const body = h('div', { class: 'drawer-body' });
-  const tabs = [['comments', 'Comentarios'], ['files', 'Archivos'], ['history', 'Historial']];
+  const tabs = [['details', 'Detalles'], ['comments', 'Comentarios'], ['files', 'Archivos'], ['history', 'Historial']];
   const parent = p.parent_id ? findP(p.parent_id) : null;
   const dr = h('aside', { class: 'drawer', role: 'dialog', 'aria-label': 'Detalle' },
     h('div', { class: 'drawer-head' }, h('div', { style: 'flex:1;min-width:0' }, parent ? h('div', { class: 'muted' }, 'Subtarea de ' + (parent.data.name || '')) : h('div', { class: 'muted' }, p.data.code || ''), h('h3', {}, p.data.name || 'Sin nombre')),
       h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: () => dr.remove() })),
     h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, l]) => h('button', { class: k === tab ? 'on' : '', role: 'tab', onclick: () => openDrawer(id, k) }, l))), body);
   document.body.append(dr);
-  if (tab === 'comments') drawComments(p, body); else if (tab === 'files') drawFiles(p, body); else drawHistory(p, body);
+  if (tab === 'details') drawDetails(p, body); else if (tab === 'comments') drawComments(p, body); else if (tab === 'files') drawFiles(p, body); else drawHistory(p, body);
+}
+function drawDetails(p, body) {
+  const scope = p.parent_id ? 'sub' : 'project', ro = !canEdit();
+  const save = async (key, v) => { await patch(p, { [key]: v }); };
+  const fieldFor = c => {
+    const v = p.data[c.key], id = 'dt-' + c.key; let el;
+    if (c.type === 'progress' && !p.parent_id && subsOf(p.id).length) el = h('div', {}, progBar(progressOf(p).v, true), h('small', { class: 'muted' }, 'Calculado con las subtareas'));
+    else if (c.type === 'status' || c.type === 'label') el = h('select', { class: 'input', id, disabled: ro, onchange: e => save(c.key, e.target.value || null) }, h('option', { value: '' }, '—'), (c.options || []).map(o => h('option', { value: o.label, selected: v === o.label }, o.label)));
+    else if (c.type === 'priority') el = h('select', { class: 'input', id, disabled: ro, onchange: e => save(c.key, num(e.target.value)) }, h('option', { value: '' }, '—'), [1, 2, 3, 4, 5].map(n => h('option', { value: n, selected: num(v) === n }, '★'.repeat(n))));
+    else if (c.type === 'checkbox') el = h('input', { type: 'checkbox', id, checked: !!v, disabled: ro, onchange: e => save(c.key, e.target.checked) });
+    else if (c.type === 'longtext') el = h('textarea', { class: 'input', id, value: v ?? '', disabled: ro, onchange: e => save(c.key, e.target.value.trim() || null) });
+    else { const isNum = ['money', 'number', 'progress'].includes(c.type); el = h('input', { class: 'input', id, type: isNum ? 'number' : c.type === 'date' ? 'date' : 'text', step: 'any', value: v ?? '', disabled: ro,
+      onchange: e => { let x = e.target.value.trim(); x = isNum ? num(x) : (x || null); if (c.type === 'progress' && x != null) x = Math.max(0, Math.min(100, x)); save(c.key, x); } }); }
+    return h('div', { class: 'field' }, h('label', { for: id }, c.label + (c.type === 'money' ? ' (USD)' : '').replace(' (USD) (USD)', ' (USD)')), el);
+  };
+  body.replaceChildren(h('div', {},
+    h('div', { class: 'field' }, h('label', { for: 'dt-name' }, 'Nombre'), h('input', { class: 'input', id: 'dt-name', value: p.data.name || '', disabled: ro, onchange: e => e.target.value.trim() && save('name', e.target.value.trim()) })),
+    cols(scope).map(fieldFor),
+    h('div', { class: 'field' }, h('label', {}, 'Color de la línea'), h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, [null, ...PALETTE].map(c => h('button', { class: 'cdot big', disabled: ro, style: `background:${c || '#fff'}${p.color === c ? ';box-shadow:0 0 0 2px var(--g900)' : ''}`, 'aria-label': c || 'Sin color',
+      onclick: async () => { p.color = c; render(); openDrawer(p.id, 'details'); await q(sb.from('projects').update({ color: c }).eq('id', p.id)); } }))))));
 }
 function drawComments(p, body) {
   const ta = h('textarea', { class: 'input', placeholder: 'Escribe una actualización…', 'aria-label': 'Comentario' });
@@ -752,12 +799,14 @@ async function importExcel(f, updateExisting) {
         if (!color) { const hx = argbHex(cell.fill?.fgColor?.argb); if (hx && !nearWhite(hx) && m.key !== 'status' && m.key !== 'area') color = hx; }
       }
       if (!data.name && !data.code) continue;
+      const rh = row.height ? Math.round(row.height / 0.75) : null;
       if (side[r]) data.comment = (data.comment ? data.comment + ' · ' : '') + 'Nota: ' + side[r];
       if (!data.name) data.name = data.code;
       if (level === 'subtarea' && lastTop) { pending.push({ parentRef: lastTop, data, color }); continue; }
       const ex = updateExisting && S.projects.find(p => !p.parent_id && p.group_id === g.id && (data.code ? p.data.code === data.code : !p.data.code && p.data.name === data.name));
       if (ex) { await patch(ex, data); if (color) { ex.color = color; await q(sb.from('projects').update({ color }).eq('id', ex.id)); } lastTop = ex; updated++; }
       else { lastTop = await createProject({ group_id: g.id, data, color }, true); created++; }
+      if (rh && rh > 44 && lastTop) { lastTop.height = rh; await q(sb.from('projects').update({ height: rh }).eq('id', lastTop.id)); }
     }
     for (const s of pending) {
       const ex = updateExisting && subsOf(s.parentRef.id).find(x => x.data.name === s.data.name);
@@ -788,7 +837,7 @@ async function exportExcel() {
     const hr = ws.getRow(1); hr.height = 22;
     hr.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fmt.headerFill } }; c.font = { bold: true, color: { argb: fmt.headerFont } }; c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; });
     for (const p of topOf(g.id)) {
-      const row = ws.addRow({});
+      const row = ws.addRow({}); if (p.height) row.height = Math.round(p.height * 0.75);
       all.forEach((c, i) => {
         const cell = row.getCell(i + 1);
         let val = c.key === '_level' ? 'Proyecto' : c.type === 'money' ? moneyOf(p, c.key).v : c.type === 'progress' ? progressOf(p).v : p.data[c.key];
@@ -798,7 +847,7 @@ async function exportExcel() {
         cell.alignment = cell.alignment || { vertical: 'top', wrapText: c.type === 'longtext' };
       });
       for (const s of subsOf(p.id)) {
-        const r2 = ws.addRow({}); r2.outlineLevel = 1;
+        const r2 = ws.addRow({}); r2.outlineLevel = 1; if (s.height) r2.height = Math.round(s.height * 0.75);
         all.forEach((c, i) => {
           const cell = r2.getCell(i + 1);
           const val = c.key === '_level' ? 'Subtarea' : c.key === 'progress' ? subProgress(s) : s.data[c.key];
@@ -810,10 +859,16 @@ async function exportExcel() {
     }
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: all.length } };
   }
+  const hdrStyle = ws => ws.getRow(1).eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fmt.headerFill } }; c.font = { bold: true, color: { argb: fmt.headerFont } }; });
+  const pName = id => { const p = findP(id); if (!p) return ''; const par = p.parent_id ? findP(p.parent_id) : null; return par ? `${par.data.name} › ${p.data.name}` : p.data.name; };
+  if (S.comments.length) { const cs = wb.addWorksheet('Comentarios'); cs.columns = [{ header: 'Proyecto / subtarea', width: 50 }, { header: 'Fecha', width: 20 }, { header: 'Usuario', width: 20 }, { header: 'Comentario', width: 90 }]; hdrStyle(cs);
+    S.comments.slice().sort((x, y) => String(x.created_at).localeCompare(String(y.created_at))).forEach(c => { const r = cs.addRow([pName(c.project_id), new Date(c.created_at), c.author_email, c.body]); r.getCell(2).numFmt = 'dd/mm/yyyy hh:mm'; r.getCell(4).alignment = { wrapText: true, vertical: 'top' }; }); }
+  if (S.attachments.length) { const fs = wb.addWorksheet('Archivos'); fs.columns = [{ header: 'Proyecto / subtarea', width: 50 }, { header: 'Archivo', width: 50 }, { header: 'Tamaño (KB)', width: 14 }, { header: 'Fecha', width: 20 }]; hdrStyle(fs);
+    S.attachments.forEach(x => { const r = fs.addRow([pName(x.project_id), x.name, Math.round(x.size / 1024), new Date(x.created_at)]); r.getCell(4).numFmt = 'dd/mm/yyyy hh:mm'; }); }
   const t = totals(S.projects.filter(p => !p.parent_id)), rs = wb.addWorksheet('Resumen');
   rs.columns = [{ header: 'Indicador', width: 30 }, { header: 'Valor', width: 20 }];
   rs.getRow(1).eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fmt.headerFill } }; c.font = { bold: true, color: { argb: fmt.headerFont } }; });
-  [['Proyectos', t.n], ['Retorno total (USD)', t.ret], ['Costo de desarrollo total (USD)', t.cost], ['Balance neto (USD)', t.net], ['Avance promedio', t.prog / 100], S.settings.meta?.value != null && [S.settings.meta.label || 'Meta', S.settings.meta.value]].filter(Boolean)
+  [['Proyectos', t.n], ['Retorno total (USD)', t.ret], ['Costo de desarrollo total (USD)', t.cost], ['Balance neto (USD)', t.net], ['Avance promedio', t.prog / 100], S.settings.meta?.value != null && [S.settings.meta.label || 'Meta', S.settings.meta.value], S.settings.meta?.value != null && ['Faltante para la meta (USD)', Math.max(0, S.settings.meta.value - t.ret)]].filter(Boolean)
     .forEach(([k, v], i) => { const r = rs.addRow([k, v]); r.getCell(2).numFmt = i === 0 ? '0' : i === 4 ? '0%' : '"$"#,##0'; });
   const buf = await wb.xlsx.writeBuffer();
   const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));

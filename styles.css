@@ -64,7 +64,7 @@ main{flex:1;padding:24px;max-width:100%;min-width:0}
 .page-head p{margin:4px 0 0}
 
 /* KPIs */
-.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:18px}
 .kpi{background:#fff;border-radius:var(--r);padding:14px 16px;box-shadow:var(--shadow);border-top:3px solid var(--blue);min-width:0}
 .kpi.o{border-top-color:var(--orange)}.kpi.g{border-top-color:var(--green)}.kpi.p{border-top-color:var(--purple)}.kpi.r{border-top-color:var(--orange-d)}
 .kpi .l{font-size:11px;font-weight:700;color:var(--g700);text-transform:uppercase;letter-spacing:.05em}
@@ -212,3 +212,18 @@ tr.subwrap>td{padding:10px 10px 14px 48px;background:#F7F8FB}
   tr.subwrap>td{padding-left:12px}
   .page-head h1{font-size:22px}
 }
+
+/* Redimensionar como Excel */
+.board th .rz{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:5}
+.board th .rz:hover,.board th .rz:active{background:linear-gradient(90deg,transparent 3px,var(--blue) 3px,var(--blue) 5px,transparent 5px)}
+.board td.c-drag{position:sticky}
+.board tbody td{height:var(--rh,40px)}
+.board tbody .cell,.board tbody .pill,.board tbody .name-cell,.board tbody .drag{height:var(--rh,40px)}
+.rzr{position:absolute;left:0;right:0;bottom:-3px;height:7px;cursor:row-resize;z-index:3}
+.rzr:hover{background:var(--blue);opacity:.5}
+tr.tall .cell{white-space:normal;align-items:flex-start;padding-top:10px}
+tr.tall .cell .txt{white-space:normal;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:12}
+tr.tall .name-cell .nm{white-space:normal}
+.cdot{width:14px;height:14px;border-radius:50%;border:1px solid var(--g400);padding:0;flex:none;cursor:pointer}
+.cdot.big{width:26px;height:26px}
+.cdot[disabled]{cursor:default}
