@@ -239,3 +239,6 @@ tr.tall .name-cell .nm{white-space:normal}
 .fs-ctl button{border:0;background:#fff;padding:7px 10px;font-weight:700}
 .fs-ctl button:hover{background:var(--g100)}
 .fs-ctl span{padding:7px 6px;font-size:12px;color:var(--g700);border-left:1px solid var(--g400);border-right:1px solid var(--g400)}
+
+.board .sel,.board .nm.sel{outline:2px solid var(--blue)!important;outline-offset:-2px;box-shadow:none!important}
+.board .cell:focus,.board .pill:focus,.board .nm:focus{outline:none}

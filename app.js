@@ -216,7 +216,94 @@ function render() {
   const keep = {}; m.querySelectorAll('[data-scroll]').forEach(el => keep[el.dataset.scroll] = el.scrollLeft);
   renderBoard(m);
   m.querySelectorAll('[data-scroll]').forEach(el => { if (keep[el.dataset.scroll]) el.scrollLeft = keep[el.dataset.scroll]; });
+  restoreSel();
 }
+
+/* ---------- selección, Ctrl+C / Ctrl+V / Ctrl+X / Ctrl+Z / Ctrl+Y como Excel ---------- */
+const UNDO = [], REDO = []; let batch = null;
+function pushUndo(e) { if (batch) { batch.push(e); return; } UNDO.push(e); if (UNDO.length > 100) UNDO.shift(); REDO.length = 0; }
+function selectCell(el) {
+  document.querySelectorAll('.sel').forEach(x => x.classList.remove('sel'));
+  if (!el) { S.sel = null; return; }
+  el.classList.add('sel'); const tr = el.closest('tr[data-id]'); S.sel = tr ? { id: tr.dataset.id, key: el.dataset.key } : null;
+  if (document.activeElement !== el) el.focus({ preventScroll: true });
+}
+function selEl() { return S.sel && document.querySelector(`tr[data-id="${S.sel.id}"] [data-key="${S.sel.key}"]`); }
+function restoreSel() { const el = selEl(); if (el) { el.classList.add('sel'); const a = document.activeElement; if (!a || a === document.body || a.closest('.board')) el.focus({ preventScroll: true }); } }
+const colOf = (p, key) => key === 'name' ? { key: 'name', type: 'text' } : colByKey(p.parent_id ? 'sub' : 'project', key);
+function toText(p, key) {
+  const c = colOf(p, key), v = p.data[key]; if (v == null) return '';
+  if (c?.type === 'progress') return (p.parent_id || !subsOf(p.id).length ? v : Math.round(progressOf(p).v)) + '%';
+  if (c?.type === 'checkbox') return v ? 'Sí' : 'No';
+  return String(v);
+}
+function fromText(c, t) {
+  t = String(t ?? '').trim(); if (t === '') return null;
+  switch (c?.type) {
+    case 'money': case 'number': return num(t);
+    case 'progress': { const n = num(t); return n == null ? null : Math.max(0, Math.min(100, !t.includes('%') && n <= 1 ? n * 100 : n)); }
+    case 'priority': { const n = t.includes('★') ? (t.match(/★/g) || []).length : num(t); return n ? Math.max(1, Math.min(5, Math.round(n))) : null; }
+    case 'checkbox': return ['si', 'sí', 'true', '1', 'x', 'verdadero'].includes(norm(t));
+    case 'date': { let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+      m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/); if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; return null; }
+    default: return t;
+  }
+}
+function gridOf(el) { // filas visibles y llaves de columna de la tabla de la celda
+  const table = el.closest('table'), tr = el.closest('tr[data-id]'), cls = tr.classList.contains('srow') ? 'tr.srow' : 'tr.prow';
+  const rows = [...tr.parentElement.querySelectorAll(':scope > ' + cls)];
+  const keys = ['name', ...[...table.querySelectorAll('thead th.dcol')].map(th => S.columns.find(c => c.id === th.dataset.col)?.key).filter(Boolean)];
+  return { rows, keys, r: rows.indexOf(tr), k: keys.indexOf(el.dataset.key) };
+}
+async function applyGrid(el, matrix) {
+  const { rows, keys, r, k } = gridOf(el), first = findP(rows[r].dataset.id), items = [], created = [];
+  batch = [];
+  for (let i = 0; i < matrix.length; i++) {
+    const data = {};
+    matrix[i].forEach((t, j) => { const key = keys[k + j]; if (!key) return; const p0 = first; const c = colOf(p0, key); if (c?.type === 'progress' && !p0.parent_id && rows[r + i] && subsOf(rows[r + i].dataset.id).length) return; const v = fromText(c, t); if (key === 'name' && !v) return; data[key] = v; });
+    if (!Object.keys(data).length) continue;
+    const tr = rows[r + i];
+    if (tr) { const p = findP(tr.dataset.id); items.push({ id: p.id, prev: Object.fromEntries(Object.keys(data).map(x => [x, p.data[x] ?? null])), next: data }); Object.assign(p.data, data); sb.rpc('patch_project', { p_id: p.id, p_patch: data }); }
+    else { const row = await createProject({ group_id: first.group_id, parent_id: first.parent_id, data: { name: first.parent_id ? 'Nueva subtarea' : 'Nuevo proyecto', ...data } }, true); created.push(row.id); }
+  }
+  batch = null;
+  if (items.length) pushUndo({ type: 'patch', items }); if (created.length) pushUndo({ type: 'create', ids: created });
+  render(); toast(`Pegado: ${items.length + created.length} fila(s)`, 'ok');
+}
+async function undoRedo(redo) {
+  const from = redo ? REDO : UNDO, to = redo ? UNDO : REDO, e = from.pop(); if (!e) return toast(redo ? 'Nada para rehacer' : 'Nada para deshacer');
+  if (e.type === 'patch') { for (const it of e.items) { const p = findP(it.id); if (!p) continue; const v = redo ? it.next : it.prev; Object.assign(p.data, v); sb.rpc('patch_project', { p_id: p.id, p_patch: v }); } to.push(e); render(); }
+  else if (e.type === 'create') {
+    if (redo) return toast('No se puede rehacer una creación');
+    for (const id of e.ids) { const ids = [id, ...subsOf(id).map(s => s.id)]; await q(sb.from('projects').delete().eq('id', id)); S.projects = S.projects.filter(x => !ids.includes(x.id)); }
+    render();
+  }
+  toast(redo ? 'Rehecho' : 'Deshecho');
+}
+const editing = () => { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable); };
+document.addEventListener('copy', e => { if (editing()) return; const el = selEl(); if (!el) return; const p = findP(S.sel.id); e.clipboardData.setData('text/plain', toText(p, S.sel.key)); e.preventDefault(); toast('Copiado'); });
+document.addEventListener('cut', e => { if (editing() || !canEdit()) return; const el = selEl(); if (!el) return; const p = findP(S.sel.id); e.clipboardData.setData('text/plain', toText(p, S.sel.key)); e.preventDefault(); if (S.sel.key !== 'name') patch(p, { [S.sel.key]: null }); });
+document.addEventListener('paste', e => {
+  if (editing() || !canEdit()) return; const el = selEl(); if (!el) return; e.preventDefault();
+  const text = (e.clipboardData.getData('text/plain') || '').replace(/\r/g, '').replace(/\n$/, '');
+  const matrix = text.split('\n').map(l => l.split('\t'));
+  if (matrix.length === 1 && matrix[0].length === 1) { const p = findP(S.sel.id), v = fromText(colOf(p, S.sel.key), matrix[0][0]); if (S.sel.key === 'name' && !v) return; patch(p, { [S.sel.key]: v }); }
+  else applyGrid(el, matrix);
+});
+document.addEventListener('keydown', e => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && !editing() && !document.querySelector('.overlay') && (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y') && canEdit()) { e.preventDefault(); undoRedo(e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z')); return; }
+  if (editing() || mod || e.altKey || document.querySelector('.overlay')) return;
+  const el = selEl(); if (!el || !document.contains(el)) return;
+  const move = (dr, dk) => { const g = gridOf(el), tr = g.rows[g.r + dr], key = g.keys[g.k + dk]; if (!tr || !key) return; const n = tr.querySelector(`[data-key="${key}"]`); if (n) { selectCell(n); n.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } };
+  if (e.key === 'ArrowDown') { e.preventDefault(); move(1, 0); } else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1, 0); }
+  else if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) { e.preventDefault(); move(0, 1); } else if (e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) { e.preventDefault(); move(0, -1); }
+  else if (!canEdit()) return;
+  else if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); el._start ? el._start() : el.click(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel.key !== 'name') { e.preventDefault(); patch(findP(S.sel.id), { [S.sel.key]: null }); }
+  else if (e.key.length === 1 && el._start) { e.preventDefault(); el._start(e.key); }
+});
+document.addEventListener('mousedown', e => { if (!e.target.closest('.board,.pop,.overlay,.drawer,.toolbar')) selectCell(null); });
 
 /* ---------- tamaño de letra (por usuario/navegador) ---------- */
 function getFs() { try { return Number(localStorage.getItem('lpp-fs')) || 13; } catch (e) { return 13; } }
@@ -378,7 +465,7 @@ function rowResizer(p) {
 }
 async function setRowHeight(p, v) { p.height = v; render(); await q(sb.from('projects').update({ height: v }).eq('id', p.id)); }
 function nameEditor(p) {
-  const sp = h('span', { class: 'nm', tabIndex: 0, title: p.data.name || '' }, p.data.name || 'Sin nombre');
+  const sp = h('span', { class: 'nm', tabIndex: 0, 'data-key': 'name', title: p.data.name || '' }, p.data.name || 'Sin nombre');
   if (!canEdit()) return sp;
   const start = () => {
     const inp = h('input', { class: 'input', value: p.data.name || '', style: 'padding:5px 6px;font-size:13px', 'aria-label': 'Nombre' });
@@ -386,9 +473,10 @@ function nameEditor(p) {
     const fin = async save => { if (done) return; done = true; const v = inp.value.trim(); if (save && v && v !== p.data.name) await patch(p, { name: v }); else render(); };
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') fin(true); if (e.key === 'Escape') fin(false); });
     inp.addEventListener('blur', () => fin(true));
-    sp.replaceWith(inp); inp.focus(); inp.select();
+    sp.replaceWith(inp); inp.focus(); if (typeof init === 'string') { inp.value = init; } else inp.select();
   };
-  sp.addEventListener('click', start); sp.addEventListener('keydown', e => { if (e.key === 'Enter') start(); });
+  let init = null; sp._start = ch => { init = ch; start(); };
+  sp.addEventListener('click', () => sp.classList.contains('sel') ? start() : selectCell(sp)); sp.addEventListener('dblclick', start);
   return sp;
 }
 
@@ -399,7 +487,7 @@ function cellView(p, c, isSub) {
     case 'status': case 'label': {
       const col = optColor(c, v);
       return h('div', { class: 'pill' + (v ? '' : ' empty'), role: 'button', tabIndex: 0, style: `background:${col};color:${textOn(col)}`, 'data-key': c.key,
-        onclick: e => !ro && statusPicker(e.currentTarget, p, c) }, v || '');
+        onclick: e => { selectCell(e.currentTarget); if (!ro) statusPicker(e.currentTarget, p, c); } }, v || '');
     }
     case 'money': case 'number': {
       const m = c.type === 'money' && !isSub ? moneyOf(p, c.key) : { v: num(v), calc: false };
@@ -412,8 +500,8 @@ function cellView(p, c, isSub) {
       return inlineInput(p, c, progBar(pr.v), '', 'number');
     }
     case 'date': return inlineInput(p, c, h('span', { class: 'txt' }, v ? new Date(v + 'T00:00').toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }) : ''), 'center', 'date');
-    case 'priority': return h('div', { class: 'cell ro' }, h('div', { class: 'stars', role: 'radiogroup', 'aria-label': 'Prioridad' }, [1, 2, 3, 4, 5].map(n => h('button', { class: n <= (num(v) || 0) ? 'on' : '', 'aria-label': n + ' de 5', disabled: ro, onclick: () => patch(p, { [c.key]: num(v) === n ? null : n }) }, '★'))));
-    case 'checkbox': return h('div', { class: 'cell center ro' }, h('input', { type: 'checkbox', checked: !!v, disabled: ro, 'aria-label': c.label, onchange: e => patch(p, { [c.key]: e.target.checked }) }));
+    case 'priority': return h('div', { class: 'cell ro', 'data-key': c.key, tabIndex: 0, onclick: e => selectCell(e.currentTarget) }, h('div', { class: 'stars', role: 'radiogroup', 'aria-label': 'Prioridad' }, [1, 2, 3, 4, 5].map(n => h('button', { class: n <= (num(v) || 0) ? 'on' : '', 'aria-label': n + ' de 5', disabled: ro, onclick: () => patch(p, { [c.key]: num(v) === n ? null : n }) }, '★'))));
+    case 'checkbox': return h('div', { class: 'cell center ro', 'data-key': c.key, tabIndex: 0, onclick: e => selectCell(e.currentTarget) }, h('input', { type: 'checkbox', checked: !!v, disabled: ro, 'aria-label': c.label, onchange: e => patch(p, { [c.key]: e.target.checked }) }));
     case 'person': return inlineInput(p, c, v ? h('span', { class: 'person' }, h('span', { class: 'avatar', style: `background:${hashColor(v)}` }, initials(v)), h('span', { class: 'txt' }, v)) : '', '', 'text');
     case 'longtext': return inlineInput(p, c, h('span', { class: 'txt' }, v || ''), '', 'textarea');
     default: return inlineInput(p, c, h('span', { class: 'txt' }, v ?? ''), '', 'text');
@@ -422,16 +510,17 @@ function cellView(p, c, isSub) {
 function inlineInput(p, c, content, cls, kind) {
   const d = h('div', { class: 'cell ' + cls + (canEdit() ? '' : ' ro'), tabIndex: canEdit() ? 0 : -1, 'data-key': c.key, title: typeof p.data[c.key] === 'string' ? p.data[c.key] : '' }, content);
   if (!canEdit()) return d;
+  let init = null;
   const start = () => {
     if (d.querySelector('input,textarea')) return;
     const cur = p.data[c.key] ?? '';
     if (kind === 'textarea') {
-      const ta = h('textarea', { class: 'input', value: cur, style: 'width:min(420px,85vw);min-height:140px', 'aria-label': c.label });
+      const ta = h('textarea', { class: 'input', value: typeof init === 'string' ? init : cur, style: 'width:min(420px,85vw);min-height:140px', 'aria-label': c.label });
       pop(d, h('div', { style: 'padding:6px' }, ta, h('div', { style: 'display:flex;justify-content:flex-end;gap:6px;margin-top:6px' },
         h('button', { class: 'btn', onclick: closePop }, 'Cancelar'), h('button', { class: 'btn primary', onclick: async () => { closePop(); if (ta.value !== cur) await patch(p, { [c.key]: ta.value.trim() || null }); } }, 'Guardar'))));
       ta.focus(); return;
     }
-    const inp = h('input', { type: kind, value: cur, step: 'any', 'aria-label': c.label, min: c.type === 'progress' ? 0 : null, max: c.type === 'progress' ? 100 : null });
+    const inp = h('input', { type: kind, value: typeof init === 'string' && kind !== 'date' ? init : cur, step: 'any', 'aria-label': c.label, min: c.type === 'progress' ? 0 : null, max: c.type === 'progress' ? 100 : null });
     let done = false;
     const fin = async save => {
       if (done) return; done = true;
@@ -442,9 +531,10 @@ function inlineInput(p, c, content, cls, kind) {
     };
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') fin(true); if (e.key === 'Escape') fin(false); });
     inp.addEventListener('blur', () => fin(true));
-    d.replaceChildren(inp); inp.focus(); if (inp.select && kind !== 'date') inp.select();
+    d.replaceChildren(inp); inp.focus(); if (typeof init !== 'string' && inp.select && kind !== 'date') inp.select();
   };
-  d.addEventListener('click', start); d.addEventListener('keydown', e => { if (e.key === 'Enter') start(); });
+  d._start = ch => { init = ch; start(); };
+  d.addEventListener('click', e => { if (d.querySelector('input')) return; d.classList.contains('sel') ? start() : selectCell(d); }); d.addEventListener('dblclick', () => start());
   return d;
 }
 function statusPicker(anchor, p, c) {
@@ -455,7 +545,8 @@ function statusPicker(anchor, p, c) {
 }
 
 /* ---------- persistencia ---------- */
-async function patch(p, obj) {
+async function patch(p, obj, noUndo) {
+  if (!noUndo) pushUndo({ type: 'patch', items: [{ id: p.id, prev: Object.fromEntries(Object.keys(obj).map(k => [k, p.data[k] ?? null])), next: { ...obj } }] });
   Object.assign(p.data, obj); render();
   try { await q(sb.rpc('patch_project', { p_id: p.id, p_patch: obj })); } catch { await loadAll(); render(); }
 }
@@ -463,7 +554,7 @@ async function createProject({ group_id, parent_id = null, data, color = null },
   const sib = parent_id ? subsOf(parent_id) : topOf(group_id);
   const position = (sib.length ? Math.max(...sib.map(s => s.position)) : 0) + 1000;
   const [row] = await q(sb.from('projects').insert({ group_id, parent_id, data, color, position }).select());
-  S.projects.push({ ...row, data: row.data || {} }); if (parent_id) S.open.add(parent_id);
+  S.projects.push({ ...row, data: row.data || {} }); if (parent_id) S.open.add(parent_id); pushUndo({ type: 'create', ids: [row.id] });
   if (!silent) { render(); toast(parent_id ? 'Subtarea creada' : 'Proyecto creado', 'ok'); }
   return row;
 }
