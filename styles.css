@@ -97,8 +97,8 @@ table.board{border-collapse:separate;border-spacing:0;width:max-content;table-la
 .board th .icon-btn{width:22px;height:22px;opacity:0}
 .board th:hover .icon-btn{opacity:1}
 .board th.dcol{cursor:grab}
-.board .c-drag{width:34px;position:sticky;left:0;z-index:2;text-align:center;border-left:5px solid var(--rc,transparent)}
-.board .c-name{position:sticky;left:34px;z-index:2;text-align:left;box-shadow:2px 0 4px -2px rgba(0,0,0,.08)}
+.board .c-drag{width:64px;position:sticky;left:0;z-index:2;text-align:center;border-left:5px solid var(--rc,transparent)}
+.board .c-name{position:sticky;left:64px;z-index:2;text-align:left;box-shadow:2px 0 4px -2px rgba(0,0,0,.08)}
 .board th.c-drag,.board th.c-name{z-index:3}
 .board th.c-name .th-in{justify-content:flex-start;padding-left:12px}
 .board .c-add{width:44px}
@@ -138,7 +138,7 @@ table.board{border-collapse:separate;border-spacing:0;width:max-content;table-la
 .battery i{display:block;height:100%}
 tr.subwrap>td{padding:10px 10px 14px 0;background:#F7F8FB}
 .subbox{border-left:3px solid var(--rc,var(--blue-l));border-radius:8px;overflow-x:auto;background:#fff;box-shadow:var(--shadow);width:fit-content;max-width:calc(100vw - 120px);position:sticky;left:48px}
-.subbox .board .c-name{left:34px}
+.subbox .board .c-name{left:64px}
 .sortable-ghost{opacity:.4}
 .sortable-chosen td{background:#EAF4FE!important}
 
@@ -259,3 +259,10 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 .tag{display:inline-flex;align-items:center;gap:4px;background:color-mix(in srgb,var(--tc) 14%,white);color:var(--g900);border:1px solid color-mix(in srgb,var(--tc) 35%,white);border-radius:999px;padding:1px 8px 1px 2px;font-size:calc(var(--fs,13px) - 1px);line-height:1.5;max-width:100%}
 .tag i{font-style:normal;width:18px;height:18px;border-radius:50%;background:var(--tc);color:#fff;font-size:9px;font-weight:700;display:inline-grid;place-items:center;flex:none}
 .tag button{border:0;background:none;padding:0 0 0 2px;font-size:14px;line-height:1;color:var(--g700)}
+
+.posc{display:flex;align-items:center;justify-content:center;gap:2px;min-height:var(--rh,40px)}
+.posc .drag{width:22px;height:auto}
+.pos{border:0;background:var(--g100);color:var(--g800);font-weight:700;font-size:12px;min-width:26px;height:22px;border-radius:6px;padding:0 4px;font-variant-numeric:tabular-nums}
+.pos:hover:not([disabled]){background:var(--blue);color:#fff}
+.pos[disabled]{cursor:default}
+.pos-in{width:40px;height:24px;border:1px solid var(--blue);border-radius:6px;text-align:center;font-size:12px;padding:0 2px}

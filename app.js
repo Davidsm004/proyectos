@@ -357,7 +357,7 @@ function renderGroup(g) {
       { label: 'Cambiar color', run: () => colorPicker(head, g.color, async c => { g.color = c || '#0080E8'; render(); await q(sb.from('groups').update({ color: g.color }).eq('id', g.id)); }) },
       '-', { label: 'Eliminar grupo', danger: true, run: () => delGroup(g) }]) }) : null);
   if (collapsed) return h('section', { class: 'group', 'data-group': g.id }, head);
-  const thead = h('thead', {}, h('tr', { 'data-scope': 'project' }, h('th', { class: 'c-drag' }), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Proyecto')), nameResizer('project')),
+  const thead = h('thead', {}, h('tr', { 'data-scope': 'project' }, h('th', { class: 'c-drag' }, h('div', { class: 'th-in' }, h('span', {}, 'Pos.'))), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Proyecto')), nameResizer('project')),
     pc.map(c => colHeader(c)), h('th', { class: 'c-add' }, canEdit() ? h('button', { class: 'icon-btn', svg: I.plus, title: 'Agregar columna', 'aria-label': 'Agregar columna', onclick: () => addColumn('project') }) : null)));
   const tbody = h('tbody', { 'data-group': g.id });
   for (const p of list) { tbody.append(projectRow(p, pc)); if (S.open.has(p.id)) tbody.append(subRow(p, pc.length + 3)); }
@@ -367,7 +367,7 @@ function renderGroup(g) {
     pc.map(c => h('td', {}, addCell({ group_id: g.id }, c))), h('td', {})));
   foot.append(sumRow(list, pc));
   return h('section', { class: 'group', 'data-group': g.id, style: `--gc:${g.color}` }, head,
-    h('div', { class: 'tbl-wrap', 'data-scroll': g.id }, h('table', { class: 'board', style: `width:${34 + nameW('project') + pc.reduce((s, c) => s + c.width, 0) + 44}px` }, h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { 'data-namew': 'project', style: `width:${nameW('project')}px` }), pc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })), thead, tbody, foot)));
+    h('div', { class: 'tbl-wrap', 'data-scroll': g.id }, h('table', { class: 'board', style: `width:${64 + nameW('project') + pc.reduce((s, c) => s + c.width, 0) + 44}px` }, h('colgroup', {}, h('col', { style: 'width:64px' }), h('col', { 'data-namew': 'project', style: `width:${nameW('project')}px` }), pc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })), thead, tbody, foot)));
 }
 function colHeader(c) {
   return h('th', { class: 'dcol', 'data-col': c.id, title: c.label }, h('div', { class: 'th-in' }, h('span', {}, c.label),
@@ -394,7 +394,7 @@ function projectRow(p, pc) {
   const subs = subsOf(p.id), open = S.open.has(p.id);
   const nC = S.comments.filter(c => c.project_id === p.id).length, nF = S.attachments.filter(a => a.project_id === p.id).length;
   const tr = h('tr', { class: 'prow' + (p.height > 44 ? ' tall' : ''), 'data-id': p.id, style: rowStyle(p) });
-  tr.append(h('td', { class: 'c-drag' }, canEdit() ? h('span', { class: 'drag', svg: I.grip, title: 'Arrastrar' }) : null, rowResizer(p)),
+  tr.append(h('td', { class: 'c-drag' }, h('div', { class: 'posc' }, canEdit() ? h('span', { class: 'drag', svg: I.grip, title: 'Arrastrar' }) : null, posEditor(p)), rowResizer(p)),
     h('td', { class: 'c-name' }, h('div', { class: 'name-cell' },
       h('button', { class: 'icon-btn', 'aria-label': open ? 'Ocultar subtareas' : 'Ver subtareas', 'aria-expanded': String(open), onclick: () => { open ? S.open.delete(p.id) : S.open.add(p.id); render(); } }, h('span', { class: 'caret' + (open ? ' open' : ''), style: 'display:inline-grid', svg: I.caret })),
       colorDot(p), nameEditor(p), subs.length ? h('span', { class: 'subcount', title: 'Subtareas' }, subs.length) : null,
@@ -408,7 +408,7 @@ function subRow(p, span) {
   const sc = cols('sub'), subs = subsOf(p.id);
   const tbody = h('tbody', { 'data-parent': p.id });
   subs.forEach(s => tbody.append(h('tr', { class: 'srow' + (s.height > 44 ? ' tall' : ''), 'data-id': s.id, style: s.color ? rowStyle(s) : [p.color ? `--rc:${lighten(p.color, .5)};--rowbg:${tint(p.color, .04)}` : '', s.height ? `--rh:${s.height}px` : ''].join(';') },
-    h('td', { class: 'c-drag' }, canEdit() ? h('span', { class: 'drag', svg: I.grip }) : null, rowResizer(s)),
+    h('td', { class: 'c-drag' }, h('div', { class: 'posc' }, canEdit() ? h('span', { class: 'drag', svg: I.grip }) : null, posEditor(s)), rowResizer(s)),
     h('td', { class: 'c-name' }, h('div', { class: 'name-cell' }, colorDot(s), nameEditor(s),
       h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Comentarios', onclick: () => openDrawer(s.id, 'comments') }, h('span', { svg: I.chat }), S.comments.some(c => c.project_id === s.id) ? h('b', {}, S.comments.filter(c => c.project_id === s.id).length) : null),
       h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Archivos', onclick: () => openDrawer(s.id, 'files') }, h('span', { svg: I.clip }), S.attachments.some(a => a.project_id === s.id) ? h('b', {}, S.attachments.filter(a => a.project_id === s.id).length) : null),
@@ -419,9 +419,9 @@ function subRow(p, span) {
     h('input', { placeholder: '+ Agregar subtarea', 'aria-label': 'Agregar subtarea', onkeydown: async e => { if (e.key === 'Enter' && e.target.value.trim()) { const v = e.target.value.trim(); e.target.value = ''; await createProject({ group_id: p.group_id, parent_id: p.id, data: { name: v } }); } } })), sc.map(c => h('td', {}, addCell({ group_id: p.group_id, parent_id: p.id }, c))), h('td', {})));
   if (subs.length) foot.append(sumRow(subs, sc, true));
   return h('tr', { class: 'subwrap', 'data-for': p.id }, h('td', { colSpan: span, style: p.color ? `--rc:${p.color}` : '' },
-    h('div', { class: 'subbox', 'data-scroll': 'sub-' + p.id }, h('table', { class: 'board', style: `width:${34 + nameW('sub') + sc.reduce((s, c) => s + c.width, 0) + 44}px` },
-      h('colgroup', {}, h('col', { style: 'width:34px' }), h('col', { 'data-namew': 'sub', style: `width:${nameW('sub')}px` }), sc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })),
-      h('thead', {}, h('tr', { 'data-scope': 'sub' }, h('th', { class: 'c-drag' }), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Subtarea')), nameResizer('sub')), sc.map(c => colHeader(c)),
+    h('div', { class: 'subbox', 'data-scroll': 'sub-' + p.id }, h('table', { class: 'board', style: `width:${64 + nameW('sub') + sc.reduce((s, c) => s + c.width, 0) + 44}px` },
+      h('colgroup', {}, h('col', { style: 'width:64px' }), h('col', { 'data-namew': 'sub', style: `width:${nameW('sub')}px` }), sc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })),
+      h('thead', {}, h('tr', { 'data-scope': 'sub' }, h('th', { class: 'c-drag' }, h('div', { class: 'th-in' }, h('span', {}, 'Pos.'))), h('th', { class: 'c-name' }, h('div', { class: 'th-in' }, h('span', {}, 'Subtarea')), nameResizer('sub')), sc.map(c => colHeader(c)),
         h('th', { class: 'c-add' }, canEdit() ? h('button', { class: 'icon-btn', svg: I.plus, 'aria-label': 'Agregar columna de subtarea', onclick: () => addColumn('sub') }) : null))),
       tbody, foot))));
 }
@@ -442,6 +442,23 @@ function addCell(opts, c) {
   } }, '+');
 }
 const lighten = (hex, f) => '#' + [1, 3, 5].map(i => Math.round(parseInt(hex.substr(i, 2), 16) + (255 - parseInt(hex.substr(i, 2), 16)) * f).toString(16).padStart(2, '0')).join('').toUpperCase();
+const siblings = p => p.parent_id ? subsOf(p.parent_id) : topOf(p.group_id);
+function posEditor(p) {
+  const n = siblings(p).indexOf(p) + 1;
+  const b = h('button', { class: 'pos', title: canEdit() ? 'Posición · clic para cambiarla' : 'Posición', disabled: !canEdit(), onclick: e => {
+    e.stopPropagation(); const total = siblings(p).length;
+    const inp = h('input', { type: 'number', min: 1, max: total, value: n, class: 'pos-in', 'aria-label': 'Nueva posición' });
+    let done = false; const fin = async ok => { if (done) return; done = true; const v = Math.round(num(inp.value)); if (ok && v && v !== n) await setPos(p, v); else render(); };
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') fin(true); if (ev.key === 'Escape') fin(false); }); inp.addEventListener('blur', () => fin(true));
+    b.replaceWith(inp); inp.focus(); inp.select();
+  } }, n);
+  return b;
+}
+async function setPos(p, n) {
+  const list = siblings(p).filter(x => x !== p); n = Math.max(1, Math.min(list.length + 1, n)); list.splice(n - 1, 0, p);
+  const ups = []; list.forEach((x, i) => { const pos = (i + 1) * 1000; if (x.position !== pos) { x.position = pos; ups.push(q(sb.from('projects').update({ position: pos }).eq('id', x.id))); } });
+  render(); await Promise.all(ups); toast(`Movido a la posición ${n}`, 'ok');
+}
 const rowStyle = p => [p.color ? `--rc:${p.color};--rowbg:${tint(p.color)}` : '', p.height ? `--rh:${p.height}px` : ''].join(';');
 function colorDot(p) {
   return h('button', { class: 'cdot', style: `background:${p.color || '#fff'}`, title: 'Color de la línea', 'aria-label': 'Color de la línea', disabled: !canEdit(),
@@ -896,6 +913,7 @@ async function importExcel(f, updateExisting) {
     for (let ci = 1; ci < gap; ci++) {
       const raw = cellVal(head.getCell(ci)); const n = norm(raw);
       if (n === 'nivel') { map[ci] = { key: '_level' }; continue; }
+      if (['posicion', 'pos', 'pos.', '#'].includes(n)) { map[ci] = { key: '_pos' }; continue; }
       let key = Object.keys(ALIAS).find(k => ALIAS[k].includes(n) && !usedName.has(k));
       const hasData = colHas(ci);
       if (!key) { const ex = S.columns.find(c => c.scope === 'project' && norm(c.label) === n && n); if (ex) key = ex.key; }
@@ -927,6 +945,7 @@ async function importExcel(f, updateExisting) {
       for (const [ci, m] of Object.entries(map)) {
         const cell = row.getCell(Number(ci)); let v = cellVal(cell); if (v == null) continue;
         if (m.key === '_level') { level = norm(v); continue; }
+        if (m.key === '_pos') continue;
         const scope = level === 'subtarea' ? 'sub' : 'project', col = colByKey(scope, m.key) || colByKey('project', m.key);
         const t = col?.type;
         if (['money', 'number', 'priority'].includes(t)) v = num(v);
@@ -961,7 +980,7 @@ async function exportExcel() {
   const wb = new ExcelJS.Workbook(); wb.creator = 'Liberty Project Pipeline'; wb.created = new Date();
   const fmt = S.settings.excel_format || { headerFill: 'FF0080E8', headerFont: 'FFFFFFFF' };
   const pc = cols('project'), subOnly = cols('sub').filter(c => !colByKey('project', c.key));
-  const all = [{ key: 'name', label: 'Proyecto', type: 'text', width: 300 }, ...pc, ...subOnly, { key: '_level', label: 'Nivel', type: 'text', width: 90 }];
+  const all = [{ key: '_pos', label: 'Posición', type: 'number', width: 70 }, { key: 'name', label: 'Proyecto', type: 'text', width: 300 }, ...pc, ...subOnly, { key: '_level', label: 'Nivel', type: 'text', width: 90 }];
   const used = new Set();
   const setCell = (cell, c, val, p, isSub) => {
     if (c.type === 'money') { cell.value = val; cell.numFmt = '"$"#,##0'; }
@@ -980,7 +999,7 @@ async function exportExcel() {
       const row = ws.addRow({}); if (p.height) row.height = Math.round(p.height * 0.75);
       all.forEach((c, i) => {
         const cell = row.getCell(i + 1);
-        let val = c.key === '_level' ? 'Proyecto' : c.type === 'money' ? moneyOf(p, c.key).v : c.type === 'progress' ? progressOf(p).v : p.data[c.key];
+        let val = c.key === '_pos' ? topOf(g.id).indexOf(p) + 1 : c.key === '_level' ? 'Proyecto' : c.type === 'money' ? moneyOf(p, c.key).v : c.type === 'progress' ? progressOf(p).v : p.data[c.key];
         if (p.color) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + p.color.replace('#', '') + '' } };
         setCell(cell, c, val, p, false);
         if (p.color && !['status', 'label'].includes(c.type)) cell.font = { color: { argb: textOn(p.color) === '#fff' ? 'FFFFFFFF' : 'FF2F333C' } };
@@ -990,7 +1009,7 @@ async function exportExcel() {
         const r2 = ws.addRow({}); r2.outlineLevel = 1; if (s.height) r2.height = Math.round(s.height * 0.75);
         all.forEach((c, i) => {
           const cell = r2.getCell(i + 1);
-          const val = c.key === '_level' ? 'Subtarea' : c.key === 'progress' ? subProgress(s) : s.data[c.key];
+          const val = c.key === '_pos' ? subsOf(p.id).indexOf(s) + 1 : c.key === '_level' ? 'Subtarea' : c.key === 'progress' ? subProgress(s) : s.data[c.key];
           { const sc = s.color || (p.color ? lighten(p.color, .6) : null); if (sc) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + sc.replace('#', '') } }; }
           setCell(cell, c, val, s, true);
           if (c.key === 'name') cell.alignment = { indent: 2 };
