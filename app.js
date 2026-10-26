@@ -156,10 +156,11 @@ function authLayout(title, sub, form, foot) {
     h('section', { class: 'auth-form' }, h('div', { class: 'auth-card' }, h('h2', {}, title), h('p', { class: 'muted' }, sub), form, foot || null))));
 }
 function renderLogin() {
-  const user = h('input', { class: 'input', type: 'text', autocomplete: 'username', required: true, id: 'email', autocapitalize: 'none' });
-  const pass = h('input', { class: 'input', type: 'password', autocomplete: 'current-password', required: true, id: 'password' });
+  const user = h('input', { class: 'input', type: 'text', autocomplete: 'off', name: 'lpp-u', required: true, id: 'email', autocapitalize: 'none', spellcheck: false, readOnly: true, onfocus: e => e.target.removeAttribute('readonly') });
+  const pass = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', name: 'lpp-p', required: true, id: 'password', readOnly: true, onfocus: e => e.target.removeAttribute('readonly') });
+  setTimeout(() => { user.value = ''; pass.value = ''; }, 300);
   const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Ingresar');
-  const form = h('form', { onsubmit: async e => {
+  const form = h('form', { autocomplete: 'off', onsubmit: async e => {
     e.preventDefault(); btn.disabled = true; btn.textContent = 'Verificando…';
     const { data, error } = await sb.auth.signInWithPassword({ email: user.value, password: pass.value });
     if (error) { toast(error.message === 'Invalid login credentials' ? 'Usuario o contraseña incorrectos' : error.message, 'err'); btn.disabled = false; btn.textContent = 'Ingresar'; return; }
