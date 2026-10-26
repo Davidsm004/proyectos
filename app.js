@@ -293,7 +293,7 @@ document.addEventListener('paste', e => {
 document.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && !editing() && !document.querySelector('.overlay') && (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y') && canEdit()) { e.preventDefault(); undoRedo(e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z')); return; }
-  if (editing() || mod || e.altKey || document.querySelector('.overlay')) return;
+  if (editing() || mod || e.altKey || document.querySelector('.overlay') || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.defaultPrevented) return;
   const el = selEl(); if (!el || !document.contains(el)) return;
   const move = (dr, dk) => { const g = gridOf(el), tr = g.rows[g.r + dr], key = g.keys[g.k + dk]; if (!tr || !key) return; const n = tr.querySelector(`[data-key="${key}"]`); if (n) { selectCell(n); n.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } };
   if (e.key === 'ArrowDown') { e.preventDefault(); move(1, 0); } else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1, 0); }

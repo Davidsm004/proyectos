@@ -136,8 +136,8 @@ table.board{border-collapse:separate;border-spacing:0;width:max-content;table-la
 .sum-row td{background:#FAFAFC;font-weight:700;border-bottom:0}
 .battery{display:flex;height:22px;margin:0 8px;border-radius:4px;overflow:hidden;background:var(--g100)}
 .battery i{display:block;height:100%}
-tr.subwrap>td{padding:10px 10px 14px 48px;background:#F7F8FB}
-.subbox{border-left:3px solid var(--rc,var(--blue-l));border-radius:8px;overflow-x:auto;background:#fff;box-shadow:var(--shadow);max-width:calc(100vw - 120px)}
+tr.subwrap>td{padding:10px 10px 14px 0;background:#F7F8FB}
+.subbox{border-left:3px solid var(--rc,var(--blue-l));border-radius:8px;overflow-x:auto;background:#fff;box-shadow:var(--shadow);width:fit-content;max-width:calc(100vw - 120px);position:sticky;left:48px}
 .subbox .board .c-name{left:34px}
 .sortable-ghost{opacity:.4}
 .sortable-chosen td{background:#EAF4FE!important}
@@ -207,7 +207,7 @@ tr.subwrap>td{padding:10px 10px 14px 48px;background:#F7F8FB}
   .search{max-width:none;flex-basis:100%}
   .toolbar select.input{flex:1 1 40%;min-width:0}
   .form-grid{grid-template-columns:1fr}
-  .subbox{max-width:calc(100vw - 80px)}
+  .subbox{max-width:calc(100vw - 60px);left:12px}
   tr.subwrap>td{padding-left:12px}
   .page-head h1{font-size:22px}
 }
