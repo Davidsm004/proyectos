@@ -407,7 +407,7 @@ function projectRow(p, pc) {
 function subRow(p, span) {
   const sc = cols('sub'), subs = subsOf(p.id);
   const tbody = h('tbody', { 'data-parent': p.id });
-  subs.forEach(s => tbody.append(h('tr', { class: 'srow' + (s.height > 44 ? ' tall' : ''), 'data-id': s.id, style: rowStyle(s) },
+  subs.forEach(s => tbody.append(h('tr', { class: 'srow' + (s.height > 44 ? ' tall' : ''), 'data-id': s.id, style: s.color ? rowStyle(s) : [p.color ? `--rc:${lighten(p.color, .5)};--rowbg:${tint(p.color, .04)}` : '', s.height ? `--rh:${s.height}px` : ''].join(';') },
     h('td', { class: 'c-drag' }, canEdit() ? h('span', { class: 'drag', svg: I.grip }) : null, rowResizer(s)),
     h('td', { class: 'c-name' }, h('div', { class: 'name-cell' }, colorDot(s), nameEditor(s),
       h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Comentarios', onclick: () => openDrawer(s.id, 'comments') }, h('span', { svg: I.chat }), S.comments.some(c => c.project_id === s.id) ? h('b', {}, S.comments.filter(c => c.project_id === s.id).length) : null),
@@ -441,6 +441,7 @@ function addCell(opts, c) {
     setTimeout(() => { const el = document.querySelector(`tr[data-id="${row.id}"] [data-key="${c.key}"]`) || document.querySelector(`tr[data-id="${row.id}"] .stars`); if (el) { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); el.click(); } }, 50);
   } }, '+');
 }
+const lighten = (hex, f) => '#' + [1, 3, 5].map(i => Math.round(parseInt(hex.substr(i, 2), 16) + (255 - parseInt(hex.substr(i, 2), 16)) * f).toString(16).padStart(2, '0')).join('').toUpperCase();
 const rowStyle = p => [p.color ? `--rc:${p.color};--rowbg:${tint(p.color)}` : '', p.height ? `--rh:${p.height}px` : ''].join(';');
 function colorDot(p) {
   return h('button', { class: 'cdot', style: `background:${p.color || '#fff'}`, title: 'Color de la línea', 'aria-label': 'Color de la línea', disabled: !canEdit(),
@@ -967,7 +968,7 @@ async function exportExcel() {
         all.forEach((c, i) => {
           const cell = r2.getCell(i + 1);
           const val = c.key === '_level' ? 'Subtarea' : c.key === 'progress' ? subProgress(s) : s.data[c.key];
-          if (s.color) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + s.color.replace('#', '') } };
+          { const sc = s.color || (p.color ? lighten(p.color, .6) : null); if (sc) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + sc.replace('#', '') } }; }
           setCell(cell, c, val, s, true);
           if (c.key === 'name') cell.alignment = { indent: 2 };
         });
