@@ -482,7 +482,11 @@ function summarize(text) {
   return sc.sort((a, b) => b.v - a.v).slice(0, n).sort((a, b) => a.i - b.i).map(x => x.s);
 }
 let noteTimer;
-function saveNote(n) { n.updated_at = new Date().toISOString(); clearTimeout(noteTimer); noteTimer = setTimeout(() => q(sb.from('notes').update({ title: n.title, body: n.body, updated_at: n.updated_at }).eq('id', n.id)).catch(() => {}), 700); }
+function saveNote(n, now) {
+  n.updated_at = new Date().toISOString(); clearTimeout(noteTimer); const st = $('#note-state'); if (st) { st.textContent = 'Cambios sin guardar…'; st.className = 'note-state pend'; }
+  const go = async () => { await q(sb.from('notes').update({ title: n.title, body: n.body, updated_at: n.updated_at }).eq('id', n.id)).catch(() => {}); if (sb.flush) await sb.flush(); const s2 = $('#note-state'); if (s2) { s2.textContent = '✓ Guardado ' + new Date().toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' }); s2.className = 'note-state ok'; } };
+  if (now) return go(); noteTimer = setTimeout(go, 700);
+}
 async function newNote() {
   const [row] = await q(sb.from('notes').insert({ title: '', body: '', author: S.user.id, updated_at: new Date().toISOString() }).select());
   S.notes.push(row); render(); openNote(row.id); setTimeout(() => $('#note-title')?.focus(), 50);
@@ -533,9 +537,10 @@ function openNote(id) {
   const files = h('div', {}); drawFiles(cur, files, () => { render(); openNote(cur.id); });
   const dr = h('aside', { class: 'drawer note-drawer', role: 'dialog', 'aria-label': 'Nota' },
     h('div', { class: 'drawer-head' }, h('input', { class: 'input note-title', id: 'note-title', value: cur.title || '', placeholder: 'Título', disabled: ro, 'aria-label': 'Título', oninput: e => { cur.title = e.target.value; saveNote(cur); } }),
-      h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: () => { dr.remove(); render(); } })),
+      ro ? null : h('button', { class: 'btn primary', id: 'note-save', onclick: async e => { e.currentTarget.disabled = true; await saveNote(cur, true); toast('Nota guardada', 'ok'); e.currentTarget.disabled = false; render(); } }, 'Guardar'),
+      h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: async () => { if (!ro) await saveNote(cur, true); dr.remove(); render(); } })),
     h('div', { class: 'drawer-body' },
-      h('p', { class: 'muted', style: 'margin:0 0 10px' }, 'Creada ' + fdate(cur.created_at) + ' · actualizada ' + fdate(cur.updated_at) + ' · se guarda sola'),
+      h('p', { class: 'muted', style: 'margin:0 0 10px;display:flex;gap:8px;flex-wrap:wrap' }, h('span', {}, 'Creada ' + fdate(cur.created_at)), h('span', { id: 'note-state', class: 'note-state ok' }, '✓ Guardado')),
       body, h('h3', { class: 'note-h' }, 'Adjuntos'), files,
       h('div', { class: 'note-sum' }, h('h3', { class: 'note-h' }, 'Resumen de lo más importante'), sumBox),
       h('h3', { class: 'note-h' }, 'Actualizaciones'), commentsBlock(cur.id, () => { render(); openNote(cur.id); }),

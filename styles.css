@@ -583,3 +583,7 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 
 .drop-on{outline:3px dashed var(--blue)!important;outline-offset:-3px;background-color:rgba(0,128,232,.07)!important}
 tr.drop-on td{background:rgba(0,128,232,.1)!important}
+
+.note-state{font-weight:600}.note-state.ok{color:var(--green)}.note-state.pend{color:#9A4A12}
+[data-theme=dark] .note-state.ok{color:#7FD3AE}[data-theme=dark] .note-state.pend{color:#F6B98A}
+.note-drawer .drawer-head{gap:8px}
