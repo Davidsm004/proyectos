@@ -183,11 +183,11 @@ async function enter(user) {
   if (!S.projects.length && canEdit()) { S.view = 'new'; renderShell(); toast('Importa tu Excel de proyectos para comenzar', 'ok'); }
 }
 async function loadAll() {
-  const [g, c, p, cm, at, st, nt] = await Promise.all([
+  const [g, c, p, cm, at, st, nt, kc, kd] = await Promise.all([
     q(sb.from('groups').select('*').order('position')), q(sb.from('columns').select('*').order('position')),
     q(sb.from('projects').select('*').order('position')), q(sb.from('comments').select('*').order('created_at', { ascending: false })),
-    q(sb.from('attachments').select('*').order('created_at', { ascending: false })), q(sb.from('settings').select('*')), q(sb.from('notes').select('*'))]);
-  Object.assign(S, { groups: g, columns: c, projects: p.map(x => ({ ...x, data: x.data || {} })), comments: cm, attachments: at, settings: Object.fromEntries(st.map(s => [s.key, s.value])), notes: nt || [] });
+    q(sb.from('attachments').select('*').order('created_at', { ascending: false })), q(sb.from('settings').select('*')), q(sb.from('notes').select('*')), q(sb.from('kcols').select('*')), q(sb.from('kcards').select('*'))]);
+  Object.assign(S, { groups: g, columns: c, projects: p.map(x => ({ ...x, data: x.data || {} })), comments: cm, attachments: at, settings: Object.fromEntries(st.map(s => [s.key, s.value])), notes: nt || [], kcols: kc || [], kcards: kd || [] });
 }
 function subscribe() {
   if (!sb.channel) return;
@@ -363,6 +363,8 @@ async function delNote(n) {
   S.notes = S.notes.filter(x => x.id !== n.id); S.attachments = S.attachments.filter(a => a.project_id !== n.id); S.noteId = null; render(); toast('Nota eliminada', 'ok');
 }
 function renderDiary(m) {
+  const tabs = h('div', { class: 'seg', role: 'tablist' }, [['notes', 'Notas'], ['board', 'Pendientes por persona']].map(([k, l]) => h('button', { class: (S.ntab || 'notes') === k ? 'on' : '', role: 'tab', onclick: () => { S.ntab = k; render(); } }, l)));
+  if (S.ntab === 'board') return renderKanban(m, tabs);
   const mine = S.notes.filter(n => n.author === S.user.id).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
   const qq = norm(S.dq || ''), list = qq ? mine.filter(n => norm(n.title).includes(qq) || norm(n.body).includes(qq)) : mine;
   const cur = mine.find(n => n.id === S.noteId) || null;
@@ -392,8 +394,87 @@ function renderDiary(m) {
     drawSum(); setTimeout(() => { body.style.height = Math.max(260, body.scrollHeight + 4) + 'px'; }, 0);
   }
   m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Mis notas'), h('p', { class: 'muted' }, 'Tus notas personales con adjuntos y resumen automático.')),
-    canEdit() ? h('button', { class: 'btn primary', id: 'btn-note', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota') : null),
+    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, tabs, canEdit() ? h('button', { class: 'btn primary', id: 'btn-note', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota') : null)),
     h('div', { class: 'diary' }, h('aside', { class: 'card note-side' }, h('div', { class: 'search', style: 'max-width:none;margin-bottom:10px' }, h('span', { svg: I.search }), search), listEl), editor));
+}
+
+/* ---------- Pendientes por persona (tablero de cajitas) ---------- */
+const myCols = () => S.kcols.filter(c => c.author === S.user.id).sort(byPos);
+const cardsOf = cid => S.kcards.filter(k => k.col_id === cid).sort(byPos);
+const nextPos = arr => (arr.length ? Math.max(...arr.map(x => x.position || 0)) : 0) + 1000;
+async function addPerson() {
+  const r = await ask('Nueva persona', [{ name: 'name', label: 'Nombre', required: true }], 'Agregar'); if (!r) return;
+  const [row] = await q(sb.from('kcols').insert({ name: r.name.trim(), color: PALETTE[myCols().length % PALETTE.length], position: nextPos(myCols()), author: S.user.id }).select());
+  S.kcols.push(row); render();
+}
+async function cardForm(col, k) {
+  const r = await ask(k ? 'Editar' : 'Nuevo pendiente · ' + col.name, [
+    { name: 'title', label: 'Título', value: k?.title || '', required: true }, { name: 'body', label: 'Descripción', type: 'textarea', value: k?.body || '' },
+    { name: 'type', label: 'Tipo', type: 'select', value: k ? (k.is_task ? 'task' : 'note') : 'task', options: [{ value: 'task', label: 'Tarea (se puede marcar como ejecutada)' }, { value: 'note', label: 'Nota / tema a conversar' }] },
+    { name: 'done', label: 'Estado', type: 'select', value: k?.done ? 'yes' : 'no', options: [{ value: 'no', label: 'Pendiente' }, { value: 'yes', label: 'Ejecutada' }] },
+    { name: 'due', label: 'Fecha (opcional)', type: 'date', value: k?.due || '' }], k ? 'Guardar' : 'Agregar');
+  if (!r) return;
+  const v = { title: r.title.trim(), body: r.body.trim(), is_task: r.type === 'task', done: r.type === 'task' && r.done === 'yes', due: r.due || null };
+  if (k) { Object.assign(k, v); render(); await q(sb.from('kcards').update(v).eq('id', k.id)); }
+  else { const [row] = await q(sb.from('kcards').insert({ ...v, col_id: col.id, position: nextPos(cardsOf(col.id)), author: S.user.id }).select()); S.kcards.push(row); render(); }
+}
+async function setCard(k, v) { Object.assign(k, v); render(); await q(sb.from('kcards').update(v).eq('id', k.id)); }
+function renderKanban(m, tabs) {
+  const ro = !canEdit(), qq = norm(S.kq || '');
+  const match = k => !qq || norm(k.title).includes(qq) || norm(k.body).includes(qq);
+  const card = (k, col) => {
+    const due = k.due ? new Date(k.due + 'T00:00') : null, late = due && !k.done && due < new Date(new Date().toDateString());
+    return h('div', { class: 'kcard' + (k.done ? ' done' : ''), 'data-id': k.id, style: `--pc:${col.color}` },
+      h('div', { class: 'kcard-top' },
+        k.is_task ? h('input', { type: 'checkbox', class: 'kchk', checked: !!k.done, disabled: ro, title: k.done ? 'Ejecutada' : 'Marcar como ejecutada', 'aria-label': 'Ejecutada', onclick: e => e.stopPropagation(), onchange: e => setCard(k, { done: e.target.checked }) }) : null,
+        h('b', { class: 'ktitle', onclick: () => !ro && cardForm(col, k) }, k.title || 'Sin título'),
+        ro ? null : h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones', onclick: e => menu(e.currentTarget, [
+          { label: 'Editar', run: () => cardForm(col, k) },
+          { label: k.is_task ? 'Convertir en nota' : 'Convertir en tarea', run: () => setCard(k, { is_task: !k.is_task, done: false }) },
+          k.is_task && { label: k.done ? 'Marcar pendiente' : 'Marcar ejecutada', run: () => setCard(k, { done: !k.done }) },
+          '-', { label: 'Eliminar', danger: true, run: async () => { if (!await confirmBox('Eliminar', `¿Eliminar "${k.title}"?`)) return; S.kcards = S.kcards.filter(x => x.id !== k.id); render(); await q(sb.from('kcards').delete().eq('id', k.id)); } }]) })),
+      k.body ? h('p', { class: 'kbody', onclick: () => !ro && cardForm(col, k) }, k.body) : null,
+      h('div', { class: 'kfoot' }, h('span', { class: 'ktag' }, k.is_task ? 'Tarea' : 'Nota'),
+        k.is_task ? h('span', { class: 'kstate ' + (k.done ? 'ok' : 'pend') }, k.done ? '✓ Ejecutada' : 'Pendiente') : null,
+        due ? h('span', { class: 'kdue' + (late ? ' late' : '') }, due.toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })) : null));
+  };
+  const colEl = col => {
+    const cards = cardsOf(col.id), shown = cards.filter(match), pend = cards.filter(k => k.is_task && !k.done).length;
+    return h('section', { class: 'kcol', 'data-id': col.id, style: `--pc:${col.color}` },
+      h('header', { class: 'kcol-head' }, ro ? null : h('span', { class: 'kgrip drag', svg: I.grip, title: 'Arrastrar persona' }),
+        h('span', { class: 'kavatar' }, initials(col.name)),
+        h('button', { class: 'kname', title: ro ? '' : 'Cambiar nombre', onclick: async () => { if (ro) return; const r = await ask('Cambiar nombre', [{ name: 'n', label: 'Nombre', value: col.name, required: true }]); if (r) { col.name = r.n.trim(); render(); await q(sb.from('kcols').update({ name: col.name }).eq('id', col.id)); } } }, col.name),
+        h('span', { class: 'kcount', title: 'Tareas pendientes / total' }, `${pend} / ${cards.length}`),
+        ro ? null : h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones de ' + col.name, onclick: e => menu(e.currentTarget, [
+          { label: 'Cambiar nombre', run: async () => { const r = await ask('Cambiar nombre', [{ name: 'n', label: 'Nombre', value: col.name, required: true }]); if (r) { col.name = r.n.trim(); render(); await q(sb.from('kcols').update({ name: col.name }).eq('id', col.id)); } } },
+          { label: 'Cambiar color', run: () => colorPicker(document.querySelector(`.kcol[data-id="${col.id}"] .kavatar`), col.color, async c => { col.color = c || '#0080E8'; render(); await q(sb.from('kcols').update({ color: col.color }).eq('id', col.id)); }) },
+          { label: 'Ocultar ejecutadas', run: () => { S.khide = !S.khide; render(); } },
+          '-', { label: 'Eliminar persona', danger: true, run: async () => { if (!await confirmBox('Eliminar persona', `¿Eliminar a "${col.name}" y sus ${cards.length} cajitas?`)) return;
+            S.kcards = S.kcards.filter(k => k.col_id !== col.id); S.kcols = S.kcols.filter(x => x.id !== col.id); render();
+            for (const k of cards) await q(sb.from('kcards').delete().eq('id', k.id)); await q(sb.from('kcols').delete().eq('id', col.id)); } }]) })),
+      h('div', { class: 'kcards', 'data-col': col.id }, shown.filter(k => !(S.khide && k.done)).map(k => card(k, col))),
+      ro ? null : h('button', { class: 'kadd', onclick: () => cardForm(col) }, h('span', { svg: I.plus }), 'Agregar'));
+  };
+  const search = h('input', { class: 'input', type: 'search', id: 'kq', placeholder: 'Buscar pendientes…', value: S.kq || '', 'aria-label': 'Buscar pendientes',
+    oninput: e => { S.kq = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#kq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
+  const cols = myCols();
+  m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Mis notas'), h('p', { class: 'muted' }, 'Temas pendientes por persona · arrastra las cajitas entre personas')),
+    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, tabs, ro ? null : h('button', { class: 'btn primary', id: 'btn-person', onclick: addPerson }, h('span', { svg: I.plus }), 'Persona'))),
+    h('div', { class: 'toolbar' }, h('div', { class: 'search' }, h('span', { svg: I.search }), search),
+      h('label', { class: 'check', style: 'margin:0' }, h('input', { type: 'checkbox', checked: !!S.khide, onchange: e => { S.khide = e.target.checked; render(); } }), 'Ocultar ejecutadas')),
+    cols.length ? h('div', { class: 'kanban' }, cols.map(colEl)) : h('div', { class: 'card empty-state' }, h('p', {}, 'Agrega a las personas con las que tienes temas pendientes.'), ro ? null : h('button', { class: 'btn primary', onclick: addPerson }, '+ Agregar persona')));
+  if (ro || !window.Sortable) return;
+  m.querySelectorAll('.kcards').forEach(el => Sortable.create(el, { group: 'kcards', animation: 150, ghostClass: 'kghost', forceFallback: true, fallbackOnBody: true, emptyInsertThreshold: 40, filter: 'input,button', preventOnFilter: false, onEnd: async e => {
+    const ups = [];
+    for (const list of new Set([e.from, e.to])) [...list.querySelectorAll('.kcard')].forEach((n, i) => { const k = S.kcards.find(x => x.id === n.dataset.id); const pos = (i + 1) * 1000, cid = list.dataset.col;
+      if (k && (k.position !== pos || k.col_id !== cid)) { k.position = pos; k.col_id = cid; ups.push(q(sb.from('kcards').update({ position: pos, col_id: cid }).eq('id', k.id))); } });
+    render(); await Promise.all(ups);
+  } }));
+  const kb = m.querySelector('.kanban');
+  if (kb) Sortable.create(kb, { handle: '.kgrip', draggable: '.kcol', animation: 150, onEnd: async () => {
+    const ups = [...kb.querySelectorAll('.kcol')].map((n, i) => { const c = S.kcols.find(x => x.id === n.dataset.id); c.position = (i + 1) * 1000; return q(sb.from('kcols').update({ position: c.position }).eq('id', c.id)); });
+    render(); await Promise.all(ups);
+  } });
 }
 
 /* ---------- tamaño de letra (por usuario/navegador) ---------- */
