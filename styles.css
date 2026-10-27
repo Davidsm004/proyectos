@@ -528,3 +528,7 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 [data-theme=dark] .drop{border-color:var(--g400)}
 
 .g-title{font-size:14px;margin-right:4px}
+
+.lock-chip{display:inline-flex;align-items:center;gap:4px;border:0;cursor:pointer}
+.lock-chip svg{width:12px;height:12px}
+.lock-chip:hover{background:var(--blue);color:#fff}
