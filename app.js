@@ -147,6 +147,14 @@ function colorPicker(anchor, cur, cb) {
     h('button', { class: 'btn ghost', style: 'width:100%', onclick: () => { closePop(); cb(null); } }, 'Sin color')));
 }
 
+/* ---------- actualización automática a la última versión publicada ---------- */
+const MY_V = (document.currentScript && (document.currentScript.src.match(/[?&]v=(\d+)/) || [])[1]) || '';
+async function checkVersion() {
+  try { const t = await (await fetch('index.html?_=' + Date.now(), { cache: 'no-store' })).text(); const v = (t.match(/app\.js\?v=(\d+)/) || [])[1];
+    if (v && MY_V && v !== MY_V) { if ($('.inl') || document.querySelector('.overlay,.drawer textarea:focus')) return; location.replace(location.pathname + '?v=' + v); } } catch (e) {}
+}
+checkVersion(); setInterval(checkVersion, 5 * 60 * 1000);
+
 /* ---------- arranque / auth ---------- */
 async function boot() {
   sb = window.GHDB.createClient({ ...CFG, columns: window.LPP_COLUMNS, onError: m => toast(m, 'err') });
@@ -1311,9 +1319,9 @@ function drawFiles(p, body, after = () => openDrawer(p.id, 'files')) {
   }) : h('p', { class: 'muted' }, 'Sin archivos adjuntos.')));
 }
 // Arrastrar y soltar archivos: cualquier zona marcada; fuera de ellas el navegador no abre el archivo
-['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => { if (e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files')) e.preventDefault(); }));
+['dragenter', 'dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => { const t = e.dataTransfer ? [...(e.dataTransfer.types || [])] : []; if (t.includes('Files') || t.includes('application/x-moz-file')) { e.preventDefault(); if (ev === 'drop') toast('Suelta el archivo sobre una fila de proyecto, el panel de archivos, una nota o un comentario', 'err'); } }));
 function dropTarget(el, onFiles) {
-  let n = 0; const isF = e => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+  let n = 0; const isF = e => { const t = e.dataTransfer ? [...(e.dataTransfer.types || [])] : []; return t.includes('Files') || t.includes('application/x-moz-file') || (e.type === 'drop' && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0); };
   el.addEventListener('dragenter', e => { if (!isF(e)) return; e.preventDefault(); n++; el.classList.add('drop-on'); });
   el.addEventListener('dragover', e => { if (!isF(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
   el.addEventListener('dragleave', e => { if (!isF(e)) return; n = Math.max(0, n - 1); if (!n) el.classList.remove('drop-on'); });
