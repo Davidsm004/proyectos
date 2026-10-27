@@ -150,7 +150,7 @@ function colorPicker(anchor, cur, cb) {
 /* ---------- arranque / auth ---------- */
 async function boot() {
   sb = window.GHDB.createClient({ ...CFG, columns: window.LPP_COLUMNS, onError: m => toast(m, 'err') });
-  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; clearTimeout(lockTimer); try { sessionStorage.removeItem('lpp-lock'); } catch (e) {} document.getElementById('lockscreen')?.remove(); S.view = 'board'; renderLogin(); } });
+  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; clearTimeout(lockTimer); clearInterval(remTimer); $('#reminders')?.remove(); try { sessionStorage.removeItem('lpp-lock'); } catch (e) {} document.getElementById('lockscreen')?.remove(); S.view = 'board'; renderLogin(); } });
   if (await sb.status() === 'setup') return $('#app').replaceChildren(h('div', { class: 'empty-state' }, h('img', { src: 'logo.png', alt: 'Liberty', style: 'height:28px' }), h('h2', {}, 'Plataforma no disponible'), h('p', {}, 'Contacta al administrador.')));
   const { data } = await sb.auth.getSession();
   if (data?.session) await enter(data.session.user); else renderLogin();
@@ -186,6 +186,7 @@ async function enter(user) {
   S.user = user; S.profile = sb.auth.profile(); resetLock();
   await loadAll(); renderShell(); subscribe();
   try { if (sessionStorage.getItem('lpp-lock')) lockScreen(); } catch (e) {}
+  startReminders();
   if (canEdit() && !sb.auth.hasToken()) {
     if (isAdmin()) { await tokenModal(true); } else toast('Modo solo lectura: el administrador debe activar el guardado', 'err');
     if (!sb.auth.hasToken()) S.profile = { ...S.profile, role: 'viewer' }; renderShell();
@@ -373,7 +374,7 @@ function notifPanel(anchor) {
   let draw = () => {
     const items = dueItems(), fmt = d => d.toLocaleDateString('es-CR', { weekday: 'short', day: 'numeric', month: 'short' });
     const days = d => { const n = Math.round((d - new Date(new Date().toDateString())) / 864e5); return n < 0 ? `Vencida hace ${-n} día${n === -1 ? '' : 's'}` : n === 0 ? 'Vence hoy' : n === 1 ? 'Vence mañana' : 'Vence en 2 días'; };
-    box.replaceChildren(h('div', { class: 'notif-head' }, h('b', {}, 'Notificaciones'), items.length ? h('button', { class: 'link', onclick: async () => { await dismiss(items.map(i => i.key)); draw(); } }, 'Eliminar todas') : null),
+    box.replaceChildren(h('div', { class: 'notif-head' }, h('b', {}, 'Notificaciones'), ('Notification' in window) && Notification.permission !== 'granted' ? h('button', { class: 'link', onclick: async () => { const r = await Notification.requestPermission(); toast(r === 'granted' ? 'Alertas de escritorio activadas' : 'El navegador bloqueó las alertas', r === 'granted' ? 'ok' : 'err'); if (r === 'granted') desktopNotify(activeReminders()); } }, '🔔 Alertas en escritorio') : null, items.length ? h('button', { class: 'link', onclick: async () => { await dismiss(items.map(i => i.key)); draw(); } }, 'Eliminar todas') : null),
       h('div', {}, items.length ? items.map(it => h('div', { class: 'notif' + (it.late ? ' late' : '') },
         h('button', { class: 'notif-main', onclick: () => { closePop(); it.open(); } }, h('b', {}, it.title), h('span', {}, it.sub), h('em', {}, days(it.d) + ' · ' + fmt(it.d))),
         h('button', { class: 'icon-btn', svg: I.x, title: 'Eliminar notificación', 'aria-label': 'Eliminar notificación', onclick: async () => { await dismiss([it.key]); draw(); } })))
@@ -384,6 +385,42 @@ function notifPanel(anchor) {
     popEl.style.left = Math.max(8, Math.min(r.right - pw, innerWidth - pw - 8)) + 'px'; popEl.style.top = (r.bottom + 6) + 'px'; popEl.style.maxHeight = (innerHeight - r.bottom - 20) + 'px'; };
   const d0 = draw; draw = () => { d0(); place(); }; draw();
 }
+
+/* ---------- recordatorios tipo Outlook (en pantalla y en el escritorio) ---------- */
+const RKEY = 'lpp-rem';
+const remState = () => { try { return JSON.parse(localStorage.getItem(RKEY)) || { snooze: {}, shown: {} }; } catch (e) { return { snooze: {}, shown: {} }; } };
+const saveRem = s => { try { localStorage.setItem(RKEY, JSON.stringify(s)); } catch (e) {} };
+const whenTxt = d => { const n = Math.round((d - new Date(new Date().toDateString())) / 864e5); return n < 0 ? `Vencida (${-n} d)` : n === 0 ? 'Hoy' : n === 1 ? 'Mañana' : 'En 2 días'; };
+function activeReminders() { const s = remState(), now = Date.now(); return dueItems().filter(it => !(s.snooze[it.key] > now)); }
+function desktopNotify(items) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const s = remState(), today = new Date().toDateString();
+  items.forEach(it => { if (s.shown[it.key] === today) return; s.shown[it.key] = today;
+    try { const n = new Notification('Liberty · Pendiente por vencer', { body: `${it.title}\n${it.sub} · ${whenTxt(it.d)}`, icon: 'favicon.png', badge: 'favicon.png', tag: it.key, requireInteraction: true });
+      n.onclick = () => { window.focus(); n.close(); it.open(); }; } catch (e) {} });
+  saveRem(s);
+}
+function reminderCard(force) {
+  const items = activeReminders(); let card = $('#reminders');
+  if (!items.length) { card?.remove(); return; }
+  if (!card && !force && sessionStorage.getItem('lpp-rem-closed') === String(items.length)) return;
+  card?.remove();
+  const close = () => { card.remove(); try { sessionStorage.setItem('lpp-rem-closed', String(items.length)); } catch (e) {} };
+  const snooze = (keys, ms) => { const s = remState(); keys.forEach(k => s.snooze[k] = Date.now() + ms); saveRem(s); reminderCard(true); };
+  const perm = ('Notification' in window) && Notification.permission === 'default';
+  card = h('aside', { id: 'reminders', role: 'dialog', 'aria-label': 'Recordatorios' },
+    h('header', {}, h('img', { src: 'logo-white.png', alt: 'Liberty' }), h('b', {}, 'Recordatorios'), h('span', { class: 'rem-n' }, items.length), h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: close })),
+    h('div', { class: 'rem-list' }, items.map(it => h('div', { class: 'rem' + (it.late ? ' late' : '') },
+      h('span', { class: 'rem-ico', svg: I.cal }),
+      h('button', { class: 'rem-main', onclick: () => { close(); it.open(); } }, h('b', {}, it.title), h('span', {}, it.sub)),
+      h('div', { class: 'rem-side' }, h('em', {}, whenTxt(it.d)),
+        h('div', { class: 'rem-acts' }, h('button', { title: 'Recordar en 1 hora', onclick: () => snooze([it.key], 36e5) }, '1 h'), h('button', { title: 'Descartar', onclick: async () => { await dismiss([it.key]); reminderCard(true); } }, 'Descartar')))))),
+    h('footer', {}, perm ? h('button', { class: 'btn', onclick: async () => { const r = await Notification.requestPermission(); if (r === 'granted') { toast('Alertas de escritorio activadas', 'ok'); desktopNotify(activeReminders()); } reminderCard(true); } }, 'Activar alertas en el escritorio') : h('span'),
+      h('div', { style: 'display:flex;gap:6px' }, h('button', { class: 'btn', onclick: () => snooze(items.map(i => i.key), 36e5) }, 'Posponer todos 1 h'), h('button', { class: 'btn primary', onclick: async () => { await dismiss(items.map(i => i.key)); card.remove(); } }, 'Descartar todos'))));
+  document.body.append(card);
+}
+let remTimer;
+function startReminders() { clearInterval(remTimer); const tick = () => { if (!S.user) return; const items = activeReminders(); desktopNotify(items); reminderCard(false); updateBell(); }; setTimeout(tick, 1500); remTimer = setInterval(tick, 60000); }
 
 /* ---------- bloqueo por inactividad (10 min) ---------- */
 let lockTimer;
