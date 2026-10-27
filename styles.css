@@ -348,6 +348,8 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 .bell svg{width:19px;height:19px}
 .bell b{position:absolute;top:1px;right:0;background:#B3261E;color:#fff;font-size:10px;min-width:17px;height:17px;border-radius:999px;display:grid;place-items:center;padding:0 4px}
 .notif-box{width:min(380px,calc(100vw - 32px));padding:4px}
+.pop.notif-pop{max-width:calc(100vw - 16px);overflow-y:auto;padding:8px}
+@media (max-width:760px){.pop.notif-pop{left:8px!important;right:8px;width:auto}.notif-pop .notif-box{width:100%}}
 .notif-head{display:flex;justify-content:space-between;align-items:center;padding:6px 6px 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
 .notif{display:flex;align-items:flex-start;gap:4px;border-radius:8px;border-left:4px solid var(--orange);background:#FEF6F0;margin-bottom:6px}
 .notif.late{border-left-color:#B3261E;background:#FDECEA}

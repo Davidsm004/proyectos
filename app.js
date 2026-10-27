@@ -346,7 +346,7 @@ async function dismiss(keys) {
   await q(sb.from('settings').upsert({ key: dismissKey(), value: S.settings[dismissKey()] }));
 }
 function notifPanel(anchor) {
-  const draw = () => {
+  let draw = () => {
     const items = dueItems(), fmt = d => d.toLocaleDateString('es-CR', { weekday: 'short', day: 'numeric', month: 'short' });
     const days = d => { const n = Math.round((d - new Date(new Date().toDateString())) / 864e5); return n < 0 ? `Vencida hace ${-n} día${n === -1 ? '' : 's'}` : n === 0 ? 'Vence hoy' : n === 1 ? 'Vence mañana' : 'Vence en 2 días'; };
     box.replaceChildren(h('div', { class: 'notif-head' }, h('b', {}, 'Notificaciones'), items.length ? h('button', { class: 'link', onclick: async () => { await dismiss(items.map(i => i.key)); draw(); } }, 'Eliminar todas') : null),
@@ -355,7 +355,10 @@ function notifPanel(anchor) {
         h('button', { class: 'icon-btn', svg: I.x, title: 'Eliminar notificación', 'aria-label': 'Eliminar notificación', onclick: async () => { await dismiss([it.key]); draw(); } })))
         : h('p', { class: 'muted', style: 'padding:8px 4px' }, 'No hay fechas por vencer en los próximos 2 días.')));
   };
-  const box = h('div', { class: 'notif-box' }); pop(anchor, box); popEl.classList.add('wide'); draw();
+  const box = h('div', { class: 'notif-box' }); pop(anchor, box); popEl.classList.add('wide', 'notif-pop');
+  const place = () => { if (!popEl) return; const r = anchor.getBoundingClientRect(), pw = popEl.offsetWidth;
+    popEl.style.left = Math.max(8, Math.min(r.right - pw, innerWidth - pw - 8)) + 'px'; popEl.style.top = (r.bottom + 6) + 'px'; popEl.style.maxHeight = (innerHeight - r.bottom - 20) + 'px'; };
+  const d0 = draw; draw = () => { d0(); place(); }; draw();
 }
 
 /* ---------- bloqueo por inactividad (10 min) ---------- */
