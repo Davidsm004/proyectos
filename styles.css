@@ -433,3 +433,8 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 
 .ggrip{width:20px;height:28px!important;cursor:grab;flex:none}
 .group-head .ggrip svg{width:16px;height:16px}
+
+.kg-seg{margin-bottom:10px;flex-wrap:wrap;max-width:100%}
+.gsum{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--g700);margin-left:8px}
+.gsum b{color:var(--g900);font-variant-numeric:tabular-nums}
+@media (max-width:760px){.gsum{width:100%;margin-left:28px;gap:8px}.group-head{flex-wrap:wrap}}

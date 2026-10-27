@@ -593,8 +593,12 @@ applyFs();
 
 /* ---------- vista tablero ---------- */
 function renderBoard(m) {
-  const all = S.groups.flatMap(g => visibleTop(g.id));
-  const t = totals(all), meta = S.settings.meta;
+  const gs = S.groups.slice().sort(byPos);
+  if (!S.kg || (S.kg !== 'all' && !gs.some(g => g.id === S.kg))) S.kg = gs[0]?.id || 'all';
+  const all = S.kg === 'all' ? gs.flatMap(g => visibleTop(g.id)) : visibleTop(S.kg);
+  const t = totals(all), meta = S.kg === 'all' ? null : metaOf(S.kg);
+  const kgSel = gs.length > 1 ? h('div', { class: 'seg kg-seg', role: 'tablist', 'aria-label': 'Grupo de los indicadores' }, gs.map(g => h('button', { class: S.kg === g.id ? 'on' : '', role: 'tab', style: S.kg === g.id ? `color:${g.color}` : '', onclick: () => { S.kg = g.id; render(); } }, g.name)),
+    h('button', { class: S.kg === 'all' ? 'on' : '', role: 'tab', onclick: () => { S.kg = 'all'; render(); } }, 'Todos los grupos')) : null;
   const kpis = h('section', { class: 'kpis', 'aria-label': 'Indicadores' },
     h('div', { class: 'kpi g' }, h('div', { class: 'l' }, 'Retorno total'), h('div', { class: 'v', id: 'k-ret' }, fmtMoney(t.ret)), h('div', { class: 's' }, `${t.n} proyectos`)),
     h('div', { class: 'kpi o' }, h('div', { class: 'l' }, 'Costo de desarrollo'), h('div', { class: 'v', id: 'k-cost' }, fmtMoney(t.cost)), h('div', { class: 's' }, 'USD')),
@@ -623,7 +627,7 @@ function renderBoard(m) {
     h('button', { class: 'btn', id: 'btn-export', onclick: exportExcel }, h('span', { svg: I.down }), 'Exportar'));
   const groups = S.groups.slice().sort(byPos).map(renderGroup);
   m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Pipeline de proyectos'), h('p', { class: 'muted' }, 'Haz clic en cualquier celda para editar · arrastra filas y columnas para reordenar'))),
-    kpis, tb, h('div', { id: 'groups' }, groups.length ? groups : h('div', { class: 'empty-state' }, 'Aún no hay grupos. ', canEdit() ? h('button', { class: 'btn primary', onclick: addGroup }, 'Crear grupo') : null)));
+    kgSel, kpis, tb, h('div', { id: 'groups' }, groups.length ? groups : h('div', { class: 'empty-state' }, 'Aún no hay grupos. ', canEdit() ? h('button', { class: 'btn primary', onclick: addGroup }, 'Crear grupo') : null)));
   setupSortables(m);
 }
 function renderGroup(g) {
@@ -632,6 +636,7 @@ function renderGroup(g) {
     h('button', { class: 'icon-btn', 'aria-label': 'Contraer grupo', onclick: () => { collapsed ? S.collapsed.delete(g.id) : S.collapsed.add(g.id); render(); } }, h('span', { class: 'caret', style: collapsed ? '' : 'transform:rotate(90deg);display:inline-grid', svg: I.caret })),
     h('button', { class: 'gname', style: `color:${g.color}`, onclick: e => canEdit() && editGroupName(g) }, g.name),
     h('span', { class: 'count' }, `${list.length} proyecto${list.length === 1 ? '' : 's'}`),
+    (() => { const gt = totals(list); return h('span', { class: 'gsum' }, h('span', {}, 'Retorno ', h('b', {}, fmtMoney(gt.ret))), h('span', {}, 'Costo ', h('b', {}, fmtMoney(gt.cost))), h('span', {}, 'Balance ', h('b', { style: gt.net < 0 ? 'color:#B3261E' : '' }, fmtMoney(gt.net)))); })(),
     canEdit() ? h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones de grupo', onclick: e => menu(e.currentTarget, [
       { label: 'Agregar proyecto', run: () => quickAdd(g.id) }, { label: 'Subir grupo', run: () => moveGroup(g, -1) }, { label: 'Bajar grupo', run: () => moveGroup(g, 1) }, { label: 'Renombrar', run: () => editGroupName(g) },
       { label: 'Cambiar color', run: () => colorPicker(head, g.color, async c => { g.color = c || '#0080E8'; render(); await q(sb.from('groups').update({ color: g.color }).eq('id', g.id)); }) },
@@ -933,11 +938,13 @@ async function delGroup(g) {
   if (!await confirmBox('Eliminar grupo', `¿Eliminar "${g.name}" y todos sus proyectos?`)) return;
   await q(sb.from('groups').delete().eq('id', g.id)); S.groups = S.groups.filter(x => x.id !== g.id); S.projects = S.projects.filter(p => p.group_id !== g.id); render();
 }
+function metaOf(gid) { const first = S.groups.slice().sort(byPos)[0]; return S.settings['meta:' + gid] || (first && first.id === gid ? S.settings.meta : null); }
 async function editMeta() {
-  const m = S.settings.meta || {};
+  if (S.kg === 'all') return;
+  const gid = S.kg, m = metaOf(gid) || {};
   const r = await ask('Meta financiera', [{ name: 'label', label: 'Nombre', value: m.label || 'Meta 2027' }, { name: 'value', label: 'Monto (USD)', type: 'number', value: m.value ?? '' }]); if (!r) return;
-  S.settings.meta = { label: r.label || 'Meta', value: num(r.value) }; render();
-  await q(sb.from('settings').upsert({ key: 'meta', value: S.settings.meta }));
+  S.settings['meta:' + gid] = { label: r.label || 'Meta', value: num(r.value) }; render();
+  await q(sb.from('settings').upsert({ key: 'meta:' + gid, value: S.settings['meta:' + gid] }));
 }
 
 /* ---------- columnas ---------- */
