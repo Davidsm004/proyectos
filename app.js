@@ -452,6 +452,7 @@ function openNote(id) {
       h('p', { class: 'muted', style: 'margin:0 0 10px' }, 'Creada ' + fdate(cur.created_at) + ' · actualizada ' + fdate(cur.updated_at) + ' · se guarda sola'),
       body, h('h3', { class: 'note-h' }, 'Adjuntos'), files,
       h('div', { class: 'note-sum' }, h('h3', { class: 'note-h' }, 'Resumen de lo más importante'), sumBox),
+      h('h3', { class: 'note-h' }, 'Actualizaciones'), commentsBlock(cur.id, () => { render(); openNote(cur.id); }),
       ro ? null : h('div', { style: 'display:flex;justify-content:flex-end;margin-top:16px' }, h('button', { class: 'btn danger', onclick: () => delNote(cur) }, 'Eliminar nota'))));
   document.body.append(dr); drawSum(); setTimeout(() => grow(body), 0);
 }
@@ -510,7 +511,8 @@ function renderKanban(m) {
       h('div', { class: 'kfoot' }, h('span', { class: 'ktag' }, k.is_task ? 'Tarea' : 'Nota'),
         k.project_id && findP(k.project_id) ? h('button', { class: 'ktag kproj', title: 'Abrir proyecto', onclick: e => { e.stopPropagation(); const pp = findP(k.project_id); S.view = 'board'; if (pp.parent_id) S.open.add(pp.parent_id); renderShell(); openDrawer(pp.id, 'pnotes'); } }, '📁 ' + findP(k.project_id).data.name) : null,
         k.is_task ? h('span', { class: 'kstate ' + (k.done ? 'ok' : 'pend') }, k.done ? '✓ Ejecutada' : 'Pendiente') : null,
-        due ? h('span', { class: 'kdue' + (late ? ' late' : '') }, due.toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })) : null));
+        due ? h('span', { class: 'kdue' + (late ? ' late' : '') }, due.toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })) : null),
+      commentsBlock(k.id, () => render()));
   };
   const colEl = col => {
     const cards = cardsOf(col.id), shown = cards.filter(match), pend = cards.filter(k => k.is_task && !k.done).length;
@@ -538,7 +540,7 @@ function renderKanban(m) {
     h('div', { class: 'kcards' }, notes.map(n => { const na = S.attachments.filter(x => x.project_id === n.id).length, b = String(n.body || '');
       return h('div', { class: 'kcard knote', style: 'cursor:pointer', role: 'button', tabIndex: 0, onclick: () => openNote(n.id), onkeydown: e => { if (e.key === 'Enter') openNote(n.id); } },
         h('b', { class: 'ktitle' }, n.title || 'Sin título'), b ? h('p', { class: 'kbody' + (S.kexp?.has(n.id) ? ' open' : '') }, b) : null, b.length > 120 ? h('button', { class: 'kmore', onclick: e => { e.stopPropagation(); S.kexp = S.kexp || new Set(); S.kexp.has(n.id) ? S.kexp.delete(n.id) : S.kexp.add(n.id); render(); } }, S.kexp?.has(n.id) ? 'Ver menos ▴' : 'Ver más ▾') : null,
-        h('div', { class: 'kfoot' }, h('span', { class: 'ktag' }, 'Nota'), na ? h('span', { class: 'ktag' }, '📎 ' + na) : null, h('span', { class: 'kdue' }, new Date(n.updated_at).toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })))); })),
+        h('div', { class: 'kfoot' }, h('span', { class: 'ktag' }, 'Nota'), na ? h('span', { class: 'ktag' }, '📎 ' + na) : null, S.comments.some(c => c.project_id === n.id) ? h('span', { class: 'ktag' }, '💬 ' + S.comments.filter(c => c.project_id === n.id).length) : null, h('span', { class: 'kdue' }, new Date(n.updated_at).toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })))); })),
     ro ? null : h('button', { class: 'kadd', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota'));
   const search = h('input', { class: 'input', type: 'search', id: 'kq', placeholder: 'Buscar en notas y pendientes…', value: S.kq || '', 'aria-label': 'Buscar pendientes',
     oninput: e => { S.kq = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#kq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
@@ -549,7 +551,7 @@ function renderKanban(m) {
       h('label', { class: 'check', style: 'margin:0' }, h('input', { type: 'checkbox', checked: !!S.khide, onchange: e => { S.khide = e.target.checked; render(); } }), 'Ocultar ejecutadas')),
     h('div', { class: 'kanban' }, notesCol, cols.map(colEl), ro ? null : h('button', { class: 'kcol kaddcol', onclick: addPerson }, h('span', { svg: I.plus }), 'Agregar persona')));
   if (ro || !window.Sortable) return;
-  m.querySelectorAll('.kcol:not(.knotes) .kcards').forEach(el => Sortable.create(el, { group: 'kcards', animation: 150, ghostClass: 'kghost', forceFallback: true, fallbackOnBody: true, emptyInsertThreshold: 40, filter: 'input,button', preventOnFilter: false, onEnd: async e => {
+  m.querySelectorAll('.kcol:not(.knotes) .kcards').forEach(el => Sortable.create(el, { group: 'kcards', animation: 150, ghostClass: 'kghost', forceFallback: true, fallbackOnBody: true, emptyInsertThreshold: 40, filter: 'input,button,textarea,select,.cm', preventOnFilter: false, onEnd: async e => {
     const ups = [];
     for (const list of new Set([e.from, e.to])) [...list.querySelectorAll('.kcard')].forEach((n, i) => { const k = S.kcards.find(x => x.id === n.dataset.id); const pos = (i + 1) * 1000, cid = list.dataset.col;
       if (k && (k.position !== pos || k.col_id !== cid)) { k.position = pos; k.col_id = cid; ups.push(q(sb.from('kcards').update({ position: pos, col_id: cid }).eq('id', k.id))); } });
@@ -1023,6 +1025,43 @@ async function personCol(name) { // busca o crea la columna de la persona en Mis
   [col] = await q(sb.from('kcols').insert({ name, color: PALETTE[myCols().length % PALETTE.length], position: nextPos(myCols()), author: S.user.id }).select());
   S.kcols.push(col); return col;
 }
+/* ---------- comentarios con fecha, hora y adjuntos (acordeón) ---------- */
+const BLOBS = {};
+async function thumb(a, img) { try { if (!BLOBS[a.id]) { const r = await sb.storage.from('attachments').download(a.path); if (r.error) return; BLOBS[a.id] = URL.createObjectURL(r.data); } img.src = BLOBS[a.id]; } catch (e) {} }
+function commentsBlock(targetId, after) {
+  const list = S.comments.filter(c => c.project_id === targetId).sort((x, y) => String(x.created_at).localeCompare(String(y.created_at)));
+  S.cexp = S.cexp || new Set(); const open = S.cexp.has(targetId);
+  const head = h('button', { class: 'cm-toggle' + (open ? ' open' : ''), 'aria-expanded': String(open), onclick: e => { e.stopPropagation(); open ? S.cexp.delete(targetId) : S.cexp.add(targetId); after(); } },
+    h('span', { svg: I.chat }), `${list.length} comentario${list.length === 1 ? '' : 's'}`, h('span', { class: 'cm-caret' }, open ? '▴' : '▾'));
+  const wrap = h('div', { class: 'cm', onclick: e => e.stopPropagation(), onmousedown: e => e.stopPropagation(), onpointerdown: e => e.stopPropagation() }, head);
+  if (!open) return wrap;
+  const fdt = d => new Date(d).toLocaleString('es-CR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  list.forEach(c => {
+    const files = S.attachments.filter(x => x.project_id === c.id);
+    wrap.append(h('div', { class: 'cm-item' },
+      h('div', { class: 'cm-meta' }, h('span', { class: 'avatar', style: `width:20px;height:20px;font-size:9px;background:${hashColor(c.author_email)}` }, initials(c.author_email)), h('b', {}, c.author_email), h('span', {}, fdt(c.created_at)),
+        (c.author_id === S.user.id || isAdmin()) && canEdit() ? h('button', { class: 'link cm-del', onclick: async () => { if (!await confirmBox('Eliminar comentario', '¿Eliminar este comentario y sus adjuntos?')) return;
+          if (files.length) { await sb.storage.from('attachments').remove(files.map(f => f.path)); await q(sb.from('attachments').delete().eq('project_id', c.id)); }
+          await q(sb.from('comments').delete().eq('id', c.id)); S.comments = S.comments.filter(x => x.id !== c.id); S.attachments = S.attachments.filter(x => x.project_id !== c.id); after(); } }, 'Eliminar') : null),
+      c.body ? h('p', {}, c.body) : null,
+      files.length ? h('div', { class: 'cm-files' }, files.map(f => { const ext = (f.name.split('.').pop() || '').toLowerCase(), isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+        if (isImg) { const img = h('img', { alt: f.name, title: f.name, onclick: () => viewFile(f) }); thumb(f, img); return h('span', { class: 'cm-img' }, img); }
+        return h('button', { class: 'cm-file', title: 'Ver ' + f.name, onclick: () => viewFile(f) }, h('span', { class: 'ext', style: `background:${EXT_COLOR[ext] || 'var(--blue)'}` }, ext.slice(0, 4)), f.name); })) : null));
+  });
+  if (canEdit()) {
+    const ta = h('textarea', { class: 'input', placeholder: 'Escribe una actualización…', 'aria-label': 'Comentario', rows: 2 });
+    const fi = h('input', { type: 'file', multiple: true, accept: ACCEPT, class: 'hidden' });
+    const chosen = h('small', { class: 'muted' });
+    fi.addEventListener('change', () => { chosen.textContent = fi.files.length ? [...fi.files].map(f => f.name).join(', ') : ''; });
+    const send = h('button', { class: 'btn primary', onclick: async () => {
+      const text = ta.value.trim(); if (!text && !fi.files.length) return toast('Escribe un comentario o adjunta un archivo', 'err'); send.disabled = true;
+      const [row] = await q(sb.from('comments').insert({ project_id: targetId, body: text || '(adjunto)', author_id: S.user.id, author_email: S.profile.email }).select());
+      S.comments.unshift(row); if (fi.files.length) await upload({ id: row.id }, fi.files, () => {}); after();
+    } }, 'Comentar');
+    wrap.append(h('div', { class: 'cm-form' }, ta, h('div', { class: 'cm-actions' }, h('button', { class: 'btn', type: 'button', onclick: () => fi.click() }, h('span', { svg: I.clip }), 'Adjuntar'), chosen, fi, send)));
+  }
+  return wrap;
+}
 function drawPNotes(p, body) {
   const ro = !canEdit(), list = S.kcards.filter(k => k.project_id === p.id).sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)));
   const names = [...new Set([...myCols().map(c => c.name), ...allPersons()])].sort((x, y) => x.localeCompare(y, 'es'));
@@ -1049,7 +1088,7 @@ function drawPNotes(p, body) {
                    if (e.target.value === '__new' && !c2) return openDrawer(p.id, 'pnotes'); await setCard(k, { col_id: c2 ? c2.id : null, position: c2 ? nextPos(cardsOf(c2.id)) : 0 }); openDrawer(p.id, 'pnotes'); } },
                    h('option', { value: '' }, 'Sin responsable'), myCols().map(c => h('option', { value: c.id, selected: c.id === k.col_id }, c.name)), h('option', { value: '__new' }, '+ Nuevo responsable…')),
             ro ? (k.due ? h('span', { class: 'kdue' }, k.due) : null) : h('input', { type: 'date', class: 'pn-date', value: k.due || '', 'aria-label': 'Fecha', onchange: async e => { await setCard(k, { due: e.target.value || null }); openDrawer(p.id, 'pnotes'); } }),
-            k.done ? h('span', { class: 'kstate ok' }, '✓ Ejecutada') : null)),
+            k.done ? h('span', { class: 'kstate ok' }, '✓ Ejecutada') : null), commentsBlock(k.id, () => { render(); openDrawer(p.id, 'pnotes'); })),
         ro ? null : h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Eliminar nota', onclick: async () => { if (!await confirmBox('Eliminar nota', '¿Eliminar esta nota? También se quita de Mis notas.')) return; S.kcards = S.kcards.filter(x => x.id !== k.id); render(); openDrawer(p.id, 'pnotes'); await q(sb.from('kcards').delete().eq('id', k.id)); } }));
     }) : h('p', { class: 'muted' }, 'Este proyecto aún no tiene notas.')));
 }
