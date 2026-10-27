@@ -206,7 +206,7 @@ function renderShell() {
       h('nav', { class: 'nav', 'aria-label': 'Principal' },
         h('button', { id: 'nav-new', class: S.view === 'new' ? 'on' : '', onclick: () => go('new') }, h('span', { svg: I.plus }), 'Ingresar proyectos'),
         h('button', { id: 'nav-board', class: S.view === 'board' ? 'on' : '', onclick: () => go('board') }, h('span', { svg: I.list }), 'Ver proyectos'),
-        h('button', { id: 'nav-diary', class: S.view === 'diary' ? 'on' : '', onclick: () => go('diary') }, h('span', { svg: I.book }), 'Mi diario')),
+        h('button', { id: 'nav-diary', class: S.view === 'diary' ? 'on' : '', onclick: () => go('diary') }, h('span', { svg: I.book }), 'Mis notas')),
       h('div', { class: 'right' }, h('span', { class: 'role-chip' }, p.role),
         h('button', { class: 'icon-btn', style: 'width:auto;height:auto', title: p.email, 'aria-label': 'Cuenta', onclick: e => menu(e.currentTarget, [
           { label: p.email, run: () => {} }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
@@ -337,7 +337,7 @@ function lockScreen() {
   document.body.append(el); setTimeout(() => inp.focus(), 50);
 }
 
-/* ---------- Mi diario ---------- */
+/* ---------- Mis notas ---------- */
 const STOP = new Set('de la que el en y a los del se las por un para con no una su al lo como mas más pero sus le ya o este si sí porque esta entre cuando muy sin sobre tambien también me hasta hay donde quien desde todo nos durante todos uno les ni contra otros ese eso ante ellos e esto antes algunos que qué unos yo otro otras otra el él tanto esa estos mucho quienes nada muchos cual poco ella estar estas algunas algo nosotros mi mis tu te ti tus ellas es son fue ser han ha he hemos tiene tienen era fueron va van vamos hacer hace hizo bien solo'.split(' '));
 const KEYW = /importante|urgente|pendiente|acuerd|decisi|decid|fecha|plazo|entrega|riesgo|problema|accion|responsable|monto|presupuesto|objetivo|meta|siguiente|proximo|conclusi|resultado|\$|\d/;
 function summarize(text) {
@@ -391,7 +391,7 @@ function renderDiary(m) {
       h('div', { class: 'note-sum' }, h('h3', { class: 'note-h' }, 'Resumen de lo más importante'), sumBox));
     drawSum(); setTimeout(() => { body.style.height = Math.max(260, body.scrollHeight + 4) + 'px'; }, 0);
   }
-  m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Mi diario'), h('p', { class: 'muted' }, 'Tus notas personales con adjuntos y resumen automático.')),
+  m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Mis notas'), h('p', { class: 'muted' }, 'Tus notas personales con adjuntos y resumen automático.')),
     canEdit() ? h('button', { class: 'btn primary', id: 'btn-note', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota') : null),
     h('div', { class: 'diary' }, h('aside', { class: 'card note-side' }, h('div', { class: 'search', style: 'max-width:none;margin-bottom:10px' }, h('span', { svg: I.search }), search), listEl), editor));
 }
