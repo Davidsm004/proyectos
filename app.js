@@ -29,6 +29,8 @@ const I = {
   up: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 13V3M4 7l4-4 4 4"/></svg>',
   down: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v10M4 9l4 4 4-4"/></svg>',
   list: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4h12M2 8h12M2 12h12"/></svg>',
+  book: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 2.5h7.5A2.5 2.5 0 0113 5v8.5H5.5A2.5 2.5 0 013 11z"/><path d="M3 11a2 2 0 012-2h8"/></svg>',
+  lock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/></svg>',
   edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 2l3 3-8 8H3v-3z"/></svg>'
 };
 const PALETTE = ['#0080E8', '#47BFF9', '#003FF9', '#ED7F32', '#F0AE84', '#7E3628', '#60C69F', '#3F886B', '#9648D9', '#7128B7', '#F3BB40', '#6A6D76'];
@@ -144,7 +146,7 @@ function colorPicker(anchor, cur, cb) {
 /* ---------- arranque / auth ---------- */
 async function boot() {
   sb = window.GHDB.createClient({ ...CFG, columns: window.LPP_COLUMNS, onError: m => toast(m, 'err') });
-  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; S.view = 'board'; renderLogin(); } });
+  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; clearTimeout(lockTimer); try { sessionStorage.removeItem('lpp-lock'); } catch (e) {} document.getElementById('lockscreen')?.remove(); S.view = 'board'; renderLogin(); } });
   if (await sb.status() === 'setup') return $('#app').replaceChildren(h('div', { class: 'empty-state' }, h('img', { src: 'logo.png', alt: 'Liberty', style: 'height:28px' }), h('h2', {}, 'Plataforma no disponible'), h('p', {}, 'Contacta al administrador.')));
   const { data } = await sb.auth.getSession();
   if (data?.session) await enter(data.session.user); else renderLogin();
@@ -171,8 +173,9 @@ function renderLogin() {
   authLayout('Iniciar sesión', 'Usa tu usuario y contraseña. Si no tienes acceso, solicítalo al administrador.', form);
 }
 async function enter(user) {
-  S.user = user; S.profile = sb.auth.profile();
+  S.user = user; S.profile = sb.auth.profile(); resetLock();
   await loadAll(); renderShell(); subscribe();
+  try { if (sessionStorage.getItem('lpp-lock')) lockScreen(); } catch (e) {}
   if (canEdit() && !sb.auth.hasToken()) {
     if (isAdmin()) { await tokenModal(true); } else toast('Modo solo lectura: el administrador debe activar el guardado', 'err');
     if (!sb.auth.hasToken()) S.profile = { ...S.profile, role: 'viewer' }; renderShell();
@@ -180,17 +183,17 @@ async function enter(user) {
   if (!S.projects.length && canEdit()) { S.view = 'new'; renderShell(); toast('Importa tu Excel de proyectos para comenzar', 'ok'); }
 }
 async function loadAll() {
-  const [g, c, p, cm, at, st] = await Promise.all([
+  const [g, c, p, cm, at, st, nt] = await Promise.all([
     q(sb.from('groups').select('*').order('position')), q(sb.from('columns').select('*').order('position')),
     q(sb.from('projects').select('*').order('position')), q(sb.from('comments').select('*').order('created_at', { ascending: false })),
-    q(sb.from('attachments').select('*').order('created_at', { ascending: false })), q(sb.from('settings').select('*'))]);
-  Object.assign(S, { groups: g, columns: c, projects: p.map(x => ({ ...x, data: x.data || {} })), comments: cm, attachments: at, settings: Object.fromEntries(st.map(s => [s.key, s.value])) });
+    q(sb.from('attachments').select('*').order('created_at', { ascending: false })), q(sb.from('settings').select('*')), q(sb.from('notes').select('*'))]);
+  Object.assign(S, { groups: g, columns: c, projects: p.map(x => ({ ...x, data: x.data || {} })), comments: cm, attachments: at, settings: Object.fromEntries(st.map(s => [s.key, s.value])), notes: nt || [] });
 }
 function subscribe() {
   if (!sb.channel) return;
   sb.channel('lpp').on('changes', {}, () => {
     clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(async () => { const a = document.activeElement; if (a && a.closest && a.closest('.cell,.add-row,.overlay,.drawer')) return; await loadAll(); render(); }, 800);
+    reloadTimer = setTimeout(async () => { const a = document.activeElement; if (a && a.closest && a.closest('.cell,.add-row,.overlay,.drawer,.diary')) return; await loadAll(); render(); }, 800);
   }).subscribe();
 }
 
@@ -202,7 +205,8 @@ function renderShell() {
       h('div', { class: 'brand' }, h('img', { src: 'logo.png', alt: 'Liberty' }), h('span', {}, 'Project Pipeline')),
       h('nav', { class: 'nav', 'aria-label': 'Principal' },
         h('button', { id: 'nav-new', class: S.view === 'new' ? 'on' : '', onclick: () => go('new') }, h('span', { svg: I.plus }), 'Ingresar proyectos'),
-        h('button', { id: 'nav-board', class: S.view === 'board' ? 'on' : '', onclick: () => go('board') }, h('span', { svg: I.list }), 'Ver proyectos')),
+        h('button', { id: 'nav-board', class: S.view === 'board' ? 'on' : '', onclick: () => go('board') }, h('span', { svg: I.list }), 'Ver proyectos'),
+        h('button', { id: 'nav-diary', class: S.view === 'diary' ? 'on' : '', onclick: () => go('diary') }, h('span', { svg: I.book }), 'Mi diario')),
       h('div', { class: 'right' }, h('span', { class: 'role-chip' }, p.role),
         h('button', { class: 'icon-btn', style: 'width:auto;height:auto', title: p.email, 'aria-label': 'Cuenta', onclick: e => menu(e.currentTarget, [
           { label: p.email, run: () => {} }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
@@ -214,6 +218,7 @@ function go(v) { S.view = v; renderShell(); scrollTo(0, 0); }
 function render() {
   const m = $('#main'); if (!m) return;
   if (S.view === 'new') return renderNew(m);
+  if (S.view === 'diary') return renderDiary(m);
   const keep = {}; m.querySelectorAll('[data-scroll]').forEach(el => keep[el.dataset.scroll] = el.scrollLeft);
   renderBoard(m);
   m.querySelectorAll('[data-scroll]').forEach(el => { if (keep[el.dataset.scroll]) el.scrollLeft = keep[el.dataset.scroll]; });
@@ -292,6 +297,7 @@ document.addEventListener('paste', e => {
   else applyGrid(el, matrix);
 });
 document.addEventListener('keydown', e => {
+  if (document.getElementById('lockscreen') || S.view === 'diary') return;
   const mod = e.ctrlKey || e.metaKey;
   if (mod && !editing() && !document.querySelector('.overlay') && (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y') && canEdit()) { e.preventDefault(); undoRedo(e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z')); return; }
   if (editing() || mod || e.altKey || document.querySelector('.overlay') || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.defaultPrevented) return;
@@ -305,6 +311,90 @@ document.addEventListener('keydown', e => {
   else if (e.key.length === 1 && el._start) { e.preventDefault(); el._start(e.key); }
 });
 document.addEventListener('mousedown', e => { if (!e.target.closest('.board,.pop,.overlay,.drawer,.toolbar')) selectCell(null); });
+
+/* ---------- bloqueo por inactividad (10 min) ---------- */
+let lockTimer;
+function resetLock() { if (!S.user || document.getElementById('lockscreen')) return; clearTimeout(lockTimer); lockTimer = setTimeout(lockScreen, 10 * 60 * 1000); }
+['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel', 'scroll'].forEach(ev => document.addEventListener(ev, resetLock, { passive: true, capture: true }));
+function lockScreen() {
+  if (!S.user || document.getElementById('lockscreen')) return;
+  try { sessionStorage.setItem('lpp-lock', '1'); } catch (e) {}
+  closePop(); if (document.activeElement) document.activeElement.blur();
+  const msg = h('p', { class: 'lock-msg', role: 'alert' });
+  const inp = h('input', { type: 'password', class: 'input', placeholder: 'Palabra clave', autocomplete: 'off', 'aria-label': 'Palabra clave' });
+  const clock = h('div', { class: 'lock-time' }); const tick = () => { const d = new Date(); clock.textContent = d.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' }); clock.dataset.d = d.toLocaleDateString('es-CR', { weekday: 'long', day: 'numeric', month: 'long' }); };
+  tick(); const iv = setInterval(tick, 15000);
+  const unlock = () => {
+    if (inp.value.trim().toLowerCase() === 'hola') { clearInterval(iv); el.remove(); try { sessionStorage.removeItem('lpp-lock'); } catch (e) {} resetLock(); }
+    else { msg.textContent = 'Palabra clave incorrecta'; inp.value = ''; card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake'); inp.focus(); }
+  };
+  inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') unlock(); });
+  const card = h('div', { class: 'lock-card' }, h('img', { src: 'logo-white.png', alt: 'Liberty', class: 'lock-logo' }), clock, h('div', { class: 'lock-date' }, clock.dataset.d),
+    h('div', { class: 'lock-ico', svg: I.lock }), h('h2', {}, 'Bloqueo de pantalla'), h('p', {}, 'La sesión se bloqueó por 10 minutos de inactividad. Escribe la palabra clave para continuar.'),
+    h('form', { onsubmit: e => { e.preventDefault(); unlock(); } }, inp, h('button', { class: 'btn accent block', type: 'submit' }, 'Desbloquear')), msg,
+    h('button', { class: 'link lock-out', type: 'button', onclick: () => { clearInterval(iv); el.remove(); sb.auth.signOut(); } }, 'Cerrar sesión'));
+  const el = h('div', { id: 'lockscreen', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Bloqueo de pantalla' }, card);
+  document.body.append(el); setTimeout(() => inp.focus(), 50);
+}
+
+/* ---------- Mi diario ---------- */
+const STOP = new Set('de la que el en y a los del se las por un para con no una su al lo como mas más pero sus le ya o este si sí porque esta entre cuando muy sin sobre tambien también me hasta hay donde quien desde todo nos durante todos uno les ni contra otros ese eso ante ellos e esto antes algunos que qué unos yo otro otras otra el él tanto esa estos mucho quienes nada muchos cual poco ella estar estas algunas algo nosotros mi mis tu te ti tus ellas es son fue ser han ha he hemos tiene tienen era fueron va van vamos hacer hace hizo bien solo'.split(' '));
+const KEYW = /importante|urgente|pendiente|acuerd|decisi|decid|fecha|plazo|entrega|riesgo|problema|accion|responsable|monto|presupuesto|objetivo|meta|siguiente|proximo|conclusi|resultado|\$|\d/;
+function summarize(text) {
+  const sents = String(text || '').split(/(?<=[.!?;])\s+|\n+/).map(s => s.replace(/^[-*•\d.)\s]+/, '').trim()).filter(s => s.length > 12);
+  if (sents.length <= 3) return sents;
+  const words = t => norm(t).match(/[a-zñ0-9]+/g) || [], freq = {};
+  words(text).forEach(w => { if (w.length > 2 && !STOP.has(w)) freq[w] = (freq[w] || 0) + 1; });
+  const sc = sents.map((s, i) => { const ws = words(s).filter(w => !STOP.has(w)); return { s, i, v: ws.reduce((a, w) => a + (freq[w] || 0), 0) / Math.sqrt(ws.length || 1) + (KEYW.test(norm(s)) ? 3 : 0) + (i === 0 ? 1 : 0) }; });
+  const n = Math.min(5, Math.max(3, Math.ceil(sents.length * .3)));
+  return sc.sort((a, b) => b.v - a.v).slice(0, n).sort((a, b) => a.i - b.i).map(x => x.s);
+}
+let noteTimer;
+function saveNote(n) { n.updated_at = new Date().toISOString(); clearTimeout(noteTimer); noteTimer = setTimeout(() => q(sb.from('notes').update({ title: n.title, body: n.body, updated_at: n.updated_at }).eq('id', n.id)).catch(() => {}), 700); }
+async function newNote() {
+  const [row] = await q(sb.from('notes').insert({ title: '', body: '', author: S.user.id, updated_at: new Date().toISOString() }).select());
+  S.notes.push(row); S.noteId = row.id; render(); setTimeout(() => $('#note-title')?.focus(), 50);
+}
+async function delNote(n) {
+  if (!await confirmBox('Eliminar nota', `¿Eliminar "${n.title || 'Sin título'}" y sus adjuntos?`)) return;
+  const at = S.attachments.filter(a => a.project_id === n.id);
+  if (at.length) { await sb.storage.from('attachments').remove(at.map(a => a.path)); await q(sb.from('attachments').delete().eq('project_id', n.id)); }
+  await q(sb.from('notes').delete().eq('id', n.id));
+  S.notes = S.notes.filter(x => x.id !== n.id); S.attachments = S.attachments.filter(a => a.project_id !== n.id); S.noteId = null; render(); toast('Nota eliminada', 'ok');
+}
+function renderDiary(m) {
+  const mine = S.notes.filter(n => n.author === S.user.id).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+  const qq = norm(S.dq || ''), list = qq ? mine.filter(n => norm(n.title).includes(qq) || norm(n.body).includes(qq)) : mine;
+  const cur = mine.find(n => n.id === S.noteId) || null;
+  const fdate = d => d ? new Date(d).toLocaleString('es-CR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const snip = n => { const b = String(n.body || ''); if (!qq) return b.slice(0, 110); const i = norm(b).indexOf(qq); return i < 0 ? b.slice(0, 110) : (i > 30 ? '…' : '') + b.slice(Math.max(0, i - 30), i + 80); };
+  const search = h('input', { class: 'input', type: 'search', id: 'dq', placeholder: 'Buscar en títulos y notas…', value: S.dq || '', 'aria-label': 'Buscar notas',
+    oninput: e => { S.dq = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#dq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
+  const listEl = h('div', { class: 'note-list' }, list.length ? list.map(n => h('button', { class: 'note-item' + (cur && n.id === cur.id ? ' on' : ''), onclick: () => { S.noteId = n.id; render(); } },
+    h('b', {}, n.title || 'Sin título'), h('span', { class: 'muted' }, fdate(n.updated_at), S.attachments.some(a => a.project_id === n.id) ? ' · 📎 ' + S.attachments.filter(a => a.project_id === n.id).length : ''),
+    h('small', {}, snip(n)))) : h('p', { class: 'muted', style: 'padding:12px' }, qq ? 'No hay notas que coincidan.' : 'Aún no tienes notas.'));
+  let editor;
+  if (!cur) editor = h('div', { class: 'card empty-state' }, h('p', {}, 'Selecciona una nota o crea una nueva.'), canEdit() ? h('button', { class: 'btn primary', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota') : null);
+  else {
+    const ro = !canEdit();
+    const sumBox = h('ul', { class: 'note-sum-list' });
+    const drawSum = () => { const s = summarize(cur.body); sumBox.replaceChildren(...(s.length ? s.map(x => h('li', {}, x)) : [h('li', { class: 'muted' }, 'Escribe la nota y aquí aparecerán los puntos más importantes.')])); };
+    const body = h('textarea', { class: 'input note-body', id: 'note-body', value: cur.body || '', placeholder: 'Escribe tu nota…', disabled: ro, 'aria-label': 'Cuerpo de la nota',
+      oninput: e => { cur.body = e.target.value; e.target.style.height = 'auto'; e.target.style.height = Math.max(260, e.target.scrollHeight + 4) + 'px'; drawSum(); saveNote(cur); } });
+    const files = h('div', {}); drawFiles(cur, files, () => render());
+    editor = h('section', { class: 'card note-editor' },
+      h('div', { style: 'display:flex;gap:8px;align-items:center' }, h('input', { class: 'input note-title', id: 'note-title', value: cur.title || '', placeholder: 'Título', disabled: ro, 'aria-label': 'Título',
+        oninput: e => { cur.title = e.target.value; saveNote(cur); } }),
+        canEdit() ? h('button', { class: 'btn danger', onclick: () => delNote(cur) }, 'Eliminar') : null),
+      h('p', { class: 'muted', style: 'margin:6px 0 10px' }, 'Creada ' + fdate(cur.created_at) + ' · actualizada ' + fdate(cur.updated_at) + ' · se guarda automáticamente'),
+      body, h('h3', { class: 'note-h' }, 'Adjuntos'), files,
+      h('div', { class: 'note-sum' }, h('h3', { class: 'note-h' }, 'Resumen de lo más importante'), sumBox));
+    drawSum(); setTimeout(() => { body.style.height = Math.max(260, body.scrollHeight + 4) + 'px'; }, 0);
+  }
+  m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Mi diario'), h('p', { class: 'muted' }, 'Tus notas personales con adjuntos y resumen automático.')),
+    canEdit() ? h('button', { class: 'btn primary', id: 'btn-note', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota') : null),
+    h('div', { class: 'diary' }, h('aside', { class: 'card note-side' }, h('div', { class: 'search', style: 'max-width:none;margin-bottom:10px' }, h('span', { svg: I.search }), search), listEl), editor));
+}
 
 /* ---------- tamaño de letra (por usuario/navegador) ---------- */
 function getFs() { try { return Number(localStorage.getItem('lpp-fs')) || 13; } catch (e) { return 13; } }
@@ -776,11 +866,11 @@ function drawComments(p, body) {
 }
 const ACCEPT = '.html,.htm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg';
 const EXT_COLOR = { pdf: '#B3261E', doc: '#003FF9', docx: '#003FF9', xls: '#3F886B', xlsx: '#3F886B', csv: '#3F886B', ppt: '#ED7F32', pptx: '#ED7F32', html: '#9648D9', htm: '#9648D9' };
-function drawFiles(p, body) {
-  const input = h('input', { type: 'file', multiple: true, accept: ACCEPT, class: 'hidden', id: 'file-input', onchange: e => upload(p, e.target.files) });
+function drawFiles(p, body, after = () => openDrawer(p.id, 'files')) {
+  const input = h('input', { type: 'file', multiple: true, accept: ACCEPT, class: 'hidden', id: 'file-input', onchange: e => upload(p, e.target.files, after) });
   const drop = h('div', { class: 'drop', role: 'button', tabIndex: 0, onclick: () => input.click(),
     ondragover: e => { e.preventDefault(); drop.classList.add('over'); }, ondragleave: () => drop.classList.remove('over'),
-    ondrop: e => { e.preventDefault(); drop.classList.remove('over'); upload(p, e.dataTransfer.files); } },
+    ondrop: e => { e.preventDefault(); drop.classList.remove('over'); upload(p, e.dataTransfer.files, after); } },
     h('b', {}, 'Arrastra archivos o haz clic para cargar'), h('div', { class: 'muted' }, 'HTML, PDF, PowerPoint, Word, Excel e imágenes · máx. 25 MB'));
   const list = S.attachments.filter(a => a.project_id === p.id);
   body.replaceChildren(h('div', {}, canEdit() ? h('div', {}, drop, input) : null, list.length ? list.map(a => {
@@ -791,11 +881,11 @@ function drawFiles(p, body) {
       canEdit() ? h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Eliminar archivo', onclick: async () => {
         if (!await confirmBox('Eliminar archivo', `¿Eliminar "${a.name}"?`)) return;
         await q(sb.storage.from('attachments').remove([a.path])); await q(sb.from('attachments').delete().eq('id', a.id));
-        S.attachments = S.attachments.filter(x => x.id !== a.id); render(); openDrawer(p.id, 'files');
+        S.attachments = S.attachments.filter(x => x.id !== a.id); render(); after();
       } }) : null);
   }) : h('p', { class: 'muted' }, 'Sin archivos adjuntos.')));
 }
-async function upload(p, files) {
+async function upload(p, files, after = () => openDrawer(p.id, 'files')) {
   const okExt = ACCEPT.split(',');
   for (const f of files) {
     const ext = '.' + (f.name.split('.').pop() || '').toLowerCase();
@@ -808,7 +898,7 @@ async function upload(p, files) {
     const [row] = await q(sb.from('attachments').insert({ project_id: p.id, name: f.name, path, mime: f.type, size: f.size, uploaded_by: S.user.id }).select());
     S.attachments.unshift(row);
   }
-  render(); openDrawer(p.id, 'files');
+  render(); after();
 }
 async function signed(a, download) { const r = await q(sb.storage.from('attachments').createSignedUrl(a.path, 300, download ? { download: a.name } : undefined)); return r.signedUrl; }
 async function downloadFile(a) {

@@ -24,7 +24,7 @@ const clone = x => x == null ? x : JSON.parse(JSON.stringify(x));
 const uuid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const ITER = 250000, DATA = 'datos.json', USERS = 'usuarios.json', SKEY = 'lpp-session';
-const TABLES = ['groups', 'columns', 'projects', 'comments', 'attachments', 'settings', 'activity'];
+const TABLES = ['groups', 'columns', 'projects', 'comments', 'attachments', 'settings', 'activity', 'notes'];
 const DEF = { projects: { parent_id: null, color: null, position: 0, data: {} }, columns: { options: [], width: 150, builtin: false, position: 0 }, groups: { color: '#0080E8', position: 0 } };
 
 function gitHub(cfg) {
@@ -84,7 +84,7 @@ function createClient(cfg) {
   const gh = gitHub(cfg);
   let sess = null, T = null, sha = null, queue = [], flushing = null, timer = null, poll = null;
   const authCbs = [], changeCbs = [];
-  const emptyDb = () => ({ groups: [], columns: (cfg.columns || []).map(c => ({ id: uuid(), ...clone(c) })), projects: [], comments: [], attachments: [], settings: [], activity: [] });
+  const emptyDb = () => ({ groups: [], columns: (cfg.columns || []).map(c => ({ id: uuid(), ...clone(c) })), projects: [], comments: [], attachments: [], settings: [], activity: [], notes: [] });
   const fill = db => { TABLES.forEach(t => db[t] = db[t] || []); return db; };
   const err = m => ({ data: null, error: { message: m } });
   const notifyErr = e => (cfg.onError || console.error)(e.message || String(e));
