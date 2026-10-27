@@ -220,7 +220,7 @@ function renderShell() {
         h('button', { id: 'nav-diary', class: S.view === 'diary' ? 'on' : '', onclick: () => go('diary') }, h('span', { svg: I.book }), 'Mis notas')),
       h('div', { class: 'right' }, h('button', { class: 'icon-btn bell', id: 'theme-btn', 'aria-label': 'Modo noche', title: 'Modo noche / día', onclick: toggleTheme }, h('span', { svg: document.documentElement.dataset.theme === 'dark' ? I.sun : I.moon })), h('button', { class: 'icon-btn bell', id: 'bell', 'aria-label': 'Notificaciones', title: 'Notificaciones', onclick: e => notifPanel(e.currentTarget) }, h('span', { svg: I.bell }), h('b', { id: 'bell-n', class: 'hidden' })), h('button', { class: 'role-chip lock-chip', title: 'Bloquear pantalla', 'aria-label': 'Bloquear pantalla', onclick: lockScreen }, h('span', { svg: I.lock }), p.role),
         h('button', { class: 'icon-btn', style: 'width:auto;height:auto', title: p.email, 'aria-label': 'Cuenta', onclick: e => menu(e.currentTarget, [
-          { label: p.email, run: () => {} }, { label: '🔒 Bloquear pantalla', run: lockScreen }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
+          { label: p.email, run: () => {} }, { label: '🔒 Bloquear pantalla', run: lockScreen }, { label: '🔔 Probar recordatorio', run: testReminder }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
           h('span', { class: 'avatar', style: `background:${hashColor(p.email)}` }, initials(p.email))))),
     h('main', { id: 'main' })));
   render();
@@ -418,6 +418,20 @@ function reminderCard(force) {
     h('footer', {}, perm ? h('button', { class: 'btn', onclick: async () => { const r = await Notification.requestPermission(); if (r === 'granted') { toast('Alertas de escritorio activadas', 'ok'); desktopNotify(activeReminders()); } reminderCard(true); } }, 'Activar alertas en el escritorio') : h('span'),
       h('div', { style: 'display:flex;gap:6px' }, h('button', { class: 'btn', onclick: () => snooze(items.map(i => i.key), 36e5) }, 'Posponer todos 1 h'), h('button', { class: 'btn primary', onclick: async () => { await dismiss(items.map(i => i.key)); card.remove(); } }, 'Descartar todos'))));
   document.body.append(card);
+}
+function testReminder() {
+  const it = { key: 'test:' + Date.now(), d: new Date(new Date().toDateString()), title: 'Recordatorio de prueba', sub: 'Así se verán tus pendientes por vencer', open: () => toast('Este es un recordatorio de prueba', 'ok') };
+  $('#reminders')?.remove();
+  const card = h('aside', { id: 'reminders', role: 'dialog', 'aria-label': 'Recordatorios' },
+    h('header', {}, h('img', { src: 'logo-white.png', alt: 'Liberty' }), h('b', {}, 'Recordatorios'), h('span', { class: 'rem-n' }, '1'), h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: () => card.remove() })),
+    h('div', { class: 'rem-list' }, h('div', { class: 'rem' }, h('span', { class: 'rem-ico', svg: I.cal }), h('div', { class: 'rem-main' }, h('b', {}, it.title), h('span', {}, it.sub)), h('div', { class: 'rem-side' }, h('em', {}, 'Hoy'), h('div', { class: 'rem-acts' }, h('button', { onclick: () => card.remove() }, 'Descartar'))))),
+    h('footer', {}, h('span', { class: 'muted' }, 'Prueba'), h('button', { class: 'btn primary', onclick: () => card.remove() }, 'Descartar todos')));
+  document.body.append(card);
+  if ('Notification' in window) {
+    const fire = () => { try { const n = new Notification('Liberty · Pendiente por vencer', { body: 'Recordatorio de prueba\nAsí se verán tus alertas en el escritorio', icon: 'favicon.png', requireInteraction: true }); n.onclick = () => { window.focus(); n.close(); }; } catch (e) {} };
+    if (Notification.permission === 'granted') fire(); else if (Notification.permission === 'default') Notification.requestPermission().then(p => { if (p === 'granted') fire(); else toast('Permite las notificaciones del navegador para verlas en el escritorio', 'err'); });
+    else toast('El navegador tiene bloqueadas las notificaciones de este sitio: actívalas en el candado junto a la dirección', 'err');
+  }
 }
 let remTimer;
 function startReminders() { clearInterval(remTimer); const tick = () => { if (!S.user) return; const items = activeReminders(); desktopNotify(items); reminderCard(false); updateBell(); }; setTimeout(tick, 1500); remTimer = setInterval(tick, 60000); }
@@ -1334,8 +1348,27 @@ async function viewFile(a) {
     const url = URL.createObjectURL(new Blob([r.data], { type }));
     const view = ['pdf', 'html', 'htm'].includes(ext) ? h('iframe', { class: 'preview', src: url, title: a.name, sandbox: ext === 'pdf' ? null : '' }) : h('img', { class: 'preview-img', src: url, alt: a.name });
     modal(a.name, view, [{ label: 'Descargar', cls: 'primary', run: () => downloadFile(a) }], true);
-  } else window.open(await signed(a, false), '_blank', 'noopener');
+  } else if (['xlsx', 'docx', 'csv'].includes(ext)) {
+    const r = await sb.storage.from('attachments').download(a.path); if (r.error) return toast(r.error.message, 'err');
+    const box = h('div', { class: 'doc-prev' }, h('p', { class: 'muted' }, 'Cargando vista previa…'));
+    modal(a.name, box, [{ label: 'Descargar', cls: 'primary', run: () => downloadFile(a) }], true);
+    try {
+      if (ext === 'docx') { await loadLib('lib/mammoth.browser.min.js', 'mammoth'); const res = await window.mammoth.convertToHtml({ arrayBuffer: await r.data.arrayBuffer() });
+        const tpl = document.createElement('template'); tpl.innerHTML = res.value; tpl.content.querySelectorAll('script,iframe,object,embed,link,style').forEach(n => n.remove()); tpl.content.querySelectorAll('*').forEach(n => [...n.attributes].forEach(at => { if (/^on/i.test(at.name) || /javascript:/i.test(at.value)) n.removeAttribute(at.name); }));
+        box.replaceChildren(h('div', { class: 'docx' }, tpl.content)); }
+      else if (ext === 'csv') { const rows = (await r.data.text()).split(/\r?\n/).filter(Boolean).slice(0, 500).map(l => l.split(/[;,\t]/)); box.replaceChildren(sheetTable(rows)); }
+      else { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await r.data.arrayBuffer());
+        const tabs = h('div', { class: 'seg', style: 'margin-bottom:8px;flex-wrap:wrap' }), area = h('div', {});
+        const show = ws => { tabs.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.textContent === ws.name)); const rows = []; ws.eachRow({ includeEmpty: true }, (row, i) => { if (i > 500) return; const vals = []; for (let c = 1; c <= Math.min(ws.columnCount, 40); c++) { const v = cellVal(row.getCell(c)); vals.push(v instanceof Date ? v.toLocaleDateString('es-CR') : v ?? ''); } rows.push(vals); }); area.replaceChildren(sheetTable(rows)); };
+        wb.worksheets.forEach(ws => tabs.append(h('button', { onclick: () => show(ws) }, ws.name))); box.replaceChildren(tabs, area); if (wb.worksheets[0]) show(wb.worksheets[0]); }
+    } catch (e) { box.replaceChildren(h('p', {}, 'No se pudo mostrar la vista previa. Usa «Descargar».')); }
+  } else {
+    modal(a.name, h('div', { class: 'empty-state' }, h('p', {}, 'Los archivos de PowerPoint no se pueden ver dentro del navegador.'), h('p', { class: 'muted' }, 'Descárgalo para abrirlo con PowerPoint.')), [{ label: 'Descargar', cls: 'primary', run: c => { c(); downloadFile(a); } }]);
+  }
 }
+function sheetTable(rows) { return h('div', { class: 'sheet-prev' }, h('table', {}, rows.map((r, i) => h('tr', {}, r.map(v => h(i === 0 ? 'th' : 'td', {}, String(v))))))); }
+const libs = {};
+function loadLib(src, name) { if (window[name]) return Promise.resolve(); return libs[src] = libs[src] || new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => ko(new Error('No se pudo cargar ' + src)); document.head.append(s); }); }
 async function drawHistory(p, body) {
   body.replaceChildren(h('p', { class: 'muted' }, 'Cargando…'));
   const rows = await q(sb.from('activity').select('*').eq('project_id', p.id).order('created_at', { ascending: false }).limit(200));

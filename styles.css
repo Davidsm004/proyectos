@@ -572,3 +572,11 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 #reminders footer{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 16px;background:#FAFAFC;flex-wrap:wrap}
 [data-theme=dark] #reminders{background:#161B2A}[data-theme=dark] #reminders footer{background:#1B2133}
 @media (max-width:760px){#reminders{bottom:84px;right:16px}}
+
+.doc-prev{max-height:70vh;overflow:auto}
+.docx{background:#fff;color:#222;padding:24px;border-radius:8px;line-height:1.6;font-family:Calibri,Arial,sans-serif}
+.docx img{max-width:100%}.docx table{border-collapse:collapse}.docx td,.docx th{border:1px solid #ccc;padding:4px 6px}
+.sheet-prev{overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:8px}
+.sheet-prev table{border-collapse:collapse;font-size:12.5px;min-width:100%}
+.sheet-prev th{position:sticky;top:0;background:#002060;color:#fff;text-align:left}
+.sheet-prev th,.sheet-prev td{border:1px solid var(--line);padding:5px 8px;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}
