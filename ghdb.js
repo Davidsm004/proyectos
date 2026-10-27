@@ -48,6 +48,17 @@ function gitHub(cfg) {
     const et = r.headers.get('ETag'); if (et) etags.set(path, { etag: et, val });
     return val;
   }
+  function putXHR(path, b64content, token, msg, onProgress) { // igual que put, con avance de subida
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest(); x.open('PUT', `${api}/contents/${path}`);
+      x.setRequestHeader('Accept', 'application/vnd.github+json'); x.setRequestHeader('Authorization', 'Bearer ' + token); x.setRequestHeader('Content-Type', 'application/json');
+      x.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+      x.onload = () => { if (x.status === 409 || x.status === 422) return resolve({ conflict: true }); if (x.status === 401 || x.status === 403) return reject(Object.assign(new Error('El token de GitHub no es válido, venció o no tiene permiso de escritura'), { code: 'token' }));
+        if (x.status < 200 || x.status >= 300) return reject(new Error('No se pudo subir (' + x.status + ')')); try { resolve({ sha: JSON.parse(x.responseText).content.sha }); } catch (e) { resolve({}); } };
+      x.onerror = () => reject(new Error('Sin conexión al subir el archivo'));
+      x.send(JSON.stringify({ message: msg, content: b64content, branch: br }));
+    });
+  }
   async function put(path, b64content, sha, token, msg) {
     const body = { message: msg, content: b64content, branch: br }; if (sha) body.sha = sha;
     const r = await fetch(`${api}/contents/${path}`, { method: 'PUT', headers: { ...hdr(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -77,7 +88,7 @@ function gitHub(cfg) {
     const c = await fetch(`${api}/git/refs`, { method: 'POST', headers: { ...hdr(token), 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'refs/heads/' + br, sha: object.sha }) });
     if (!c.ok && c.status !== 422) throw new Error('No se pudo crear la rama de datos (' + c.status + ')');
   }
-  return { get, put, del, getBin, ensureBranch };
+  return { get, put, putXHR, del, getBin, ensureBranch };
 }
 
 function createClient(cfg) {
@@ -265,10 +276,10 @@ function createClient(cfg) {
         catch (e) { sess.token = prev; throw new Error(e.code === 'token' || /token/i.test(e.message) ? 'Ese token no funciona: revisa que tenga acceso a proyectos con Contents: Read and write' : e.message); } }
     },
     storage: { from: () => ({
-      upload: async (path, file) => {
+      upload: async (path, file, opts = {}) => {
         if (!canWrite()) return err('Tu rol es de solo lectura');
         try { const bytes = new Uint8Array(await file.arrayBuffer()); const box = await enc1(sess.K, bytes); const iv = b64(box.iv), ct = b64(box.ct), all = new Uint8Array(12 + ct.length); all.set(iv); all.set(ct, 12);
-          for (let i = 0; i < 4; i++) { const r = await gh.put('adjuntos/' + path, tob64(all), null, sess.token, 'Adjunto'); if (!r.conflict) return { data: { path }, error: null }; await new Promise(ok => setTimeout(ok, 700)); }
+          for (let i = 0; i < 4; i++) { const r = await gh.putXHR('adjuntos/' + path, tob64(all), sess.token, 'Adjunto', opts.onProgress); if (!r.conflict) return { data: { path }, error: null }; await new Promise(ok => setTimeout(ok, 700)); }
           return err('Conflicto al subir, intenta de nuevo'); } catch (e) { return err(e.message); }
       },
       download: async path => {

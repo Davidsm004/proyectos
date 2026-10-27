@@ -1258,6 +1258,15 @@ function drawFiles(p, body, after = () => openDrawer(p.id, 'files')) {
       } }) : null);
   }) : h('p', { class: 'muted' }, 'Sin archivos adjuntos.')));
 }
+function uploadBar(name, size) {
+  let box = $('#uploads'); if (!box) { box = h('div', { id: 'uploads', role: 'status', 'aria-live': 'polite' }); document.body.append(box); }
+  const pct = h('b', {}, '0%'), fill = h('i'), st = h('span', { class: 'up-st' }, 'Cifrando…');
+  const el = h('div', { class: 'up' }, h('div', { class: 'up-top' }, h('span', { class: 'up-n', title: name }, name), pct), h('div', { class: 'up-bar' }, fill), h('div', { class: 'up-sub' }, st, h('span', {}, (size / 1048576).toFixed(size > 1048576 ? 1 : 2) + ' MB')));
+  box.append(el);
+  const end = (cls, txt) => { el.classList.add(cls); st.textContent = txt; setTimeout(() => { el.remove(); if (!box.children.length) box.remove(); }, cls === 'ok' ? 2500 : 6000); };
+  return { set: v => { const n = Math.min(100, Math.round(v * 100)); fill.style.width = n + '%'; pct.textContent = n + '%'; st.textContent = n < 100 ? 'Subiendo…' : 'Procesando…'; },
+    done: () => { fill.style.width = '100%'; pct.textContent = '100%'; end('ok', '✓ Subido'); }, fail: m => end('err', 'Error: ' + m) };
+}
 async function upload(p, files, after = () => openDrawer(p.id, 'files')) {
   const okExt = ACCEPT.split(',');
   for (const f of files) {
@@ -1265,9 +1274,10 @@ async function upload(p, files, after = () => openDrawer(p.id, 'files')) {
     if (!okExt.includes(ext)) { toast(`Tipo no permitido: ${f.name}`, 'err'); continue; }
     if (f.size > 26214400) { toast(`Archivo supera 25 MB: ${f.name}`, 'err'); continue; }
     const path = `${p.id}/${uid()}${ext}`;
-    toast('Subiendo ' + f.name + '…');
-    const up = await sb.storage.from('attachments').upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false });
-    if (up.error) { toast(up.error.message, 'err'); continue; }
+    const pg = uploadBar(f.name, f.size);
+    const up = await sb.storage.from('attachments').upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false, onProgress: v => pg.set(v) });
+    if (up.error) { pg.fail(up.error.message); toast(up.error.message, 'err'); continue; }
+    pg.done();
     const [row] = await q(sb.from('attachments').insert({ project_id: p.id, name: f.name, path, mime: f.type, size: f.size, uploaded_by: S.user.id }).select());
     S.attachments.unshift(row);
   }

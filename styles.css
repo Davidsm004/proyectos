@@ -532,3 +532,17 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 .lock-chip{display:inline-flex;align-items:center;gap:4px;border:0;cursor:pointer}
 .lock-chip svg{width:12px;height:12px}
 .lock-chip:hover{background:var(--blue);color:#fff}
+
+/* Barra de subida de archivos */
+#uploads{position:fixed;right:16px;bottom:16px;z-index:400;display:grid;gap:8px;width:min(340px,calc(100vw - 32px))}
+.up{background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:10px 12px;border-left:4px solid var(--blue);animation:fade .2s}
+.up-top{display:flex;gap:8px;align-items:center;font-size:13px}
+.up-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.up-top b{color:var(--blue);font-variant-numeric:tabular-nums}
+.up-bar{height:8px;background:var(--g100);border-radius:6px;overflow:hidden;margin:8px 0 6px}
+.up-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--blue),var(--blue-l));border-radius:6px;transition:width .2s}
+.up-sub{display:flex;justify-content:space-between;font-size:11.5px;color:var(--g700)}
+.up.ok{border-left-color:var(--green)}.up.ok .up-bar i{background:var(--green)}.up.ok .up-st{color:var(--green);font-weight:700}
+.up.err{border-left-color:#B3261E}.up.err .up-st{color:#B3261E;font-weight:700}
+[data-theme=dark] .up{background:#161B2A}
+@media (max-width:760px){#uploads{bottom:84px;right:16px}}
