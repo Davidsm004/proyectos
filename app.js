@@ -532,6 +532,7 @@ function openNote(id) {
       h('div', { class: 'note-sum' }, h('h3', { class: 'note-h' }, 'Resumen de lo más importante'), sumBox),
       h('h3', { class: 'note-h' }, 'Actualizaciones'), commentsBlock(cur.id, () => { render(); openNote(cur.id); }),
       ro ? null : h('div', { style: 'display:flex;justify-content:flex-end;margin-top:16px' }, h('button', { class: 'btn danger', onclick: () => delNote(cur) }, 'Eliminar nota'))));
+  if (!ro) dropTarget(dr, files => upload(cur, files, () => { render(); openNote(cur.id); }));
   document.body.append(dr); drawSum(); setTimeout(() => grow(body), 0);
 }
 /* ---------- Pendientes por persona (tablero de cajitas) ---------- */
@@ -827,7 +828,7 @@ const progBar = (v, calc) => h('div', { class: 'prog' + (calc ? ' calc' : ''), t
 function projectRow(p, pc) {
   const subs = subsOf(p.id), open = S.open.has(p.id);
   const nC = S.comments.filter(c => c.project_id === p.id).length, nF = S.attachments.filter(a => a.project_id === p.id).length;
-  const tr = h('tr', { class: 'prow' + (p.height > 44 ? ' tall' : ''), 'data-id': p.id, style: rowStyle(p) });
+  const tr = dropTarget(h('tr', { class: 'prow' + (p.height > 44 ? ' tall' : ''), 'data-id': p.id, style: rowStyle(p) }), files => upload(p, files, () => openDrawer(p.id, 'files')));
   tr.append(h('td', { class: 'c-drag' }, h('div', { class: 'posc' }, canEdit() ? h('span', { class: 'drag', svg: I.grip, title: 'Arrastrar' }) : null, posEditor(p)), rowResizer(p)),
     h('td', { class: 'c-name' }, h('div', { class: 'name-cell' },
       h('button', { class: 'icon-btn', 'aria-label': open ? 'Ocultar subtareas' : 'Ver subtareas', 'aria-expanded': String(open), onclick: () => { open ? S.open.delete(p.id) : S.open.add(p.id); render(); } }, h('span', { class: 'caret' + (open ? ' open' : ''), style: 'display:inline-grid', svg: I.caret })),
@@ -1235,13 +1236,14 @@ function commentsBlock(targetId, after) {
     const ta = h('textarea', { class: 'input', placeholder: 'Escribe una actualización…', 'aria-label': 'Comentario', rows: 2 });
     const fi = h('input', { type: 'file', multiple: true, accept: ACCEPT, class: 'hidden' });
     const chosen = h('small', { class: 'muted' });
-    fi.addEventListener('change', () => { chosen.textContent = fi.files.length ? [...fi.files].map(f => f.name).join(', ') : ''; });
+    let pend = []; const showP = () => { chosen.textContent = pend.length ? '📎 ' + pend.map(f => f.name).join(', ') : ''; };
+    fi.addEventListener('change', () => { pend = pend.concat([...fi.files]); fi.value = ''; showP(); });
     const send = h('button', { class: 'btn primary', onclick: async () => {
-      const text = ta.value.trim(); if (!text && !fi.files.length) return toast('Escribe un comentario o adjunta un archivo', 'err'); send.disabled = true;
+      const text = ta.value.trim(); if (!text && !pend.length) return toast('Escribe un comentario o adjunta un archivo', 'err'); send.disabled = true;
       const [row] = await q(sb.from('comments').insert({ project_id: targetId, body: text || '(adjunto)', author_id: S.user.id, author_email: S.profile.email }).select());
-      S.comments.unshift(row); if (fi.files.length) await upload({ id: row.id }, fi.files, () => {}); after();
+      S.comments.unshift(row); if (pend.length) await upload({ id: row.id }, pend, () => {}); after();
     } }, 'Comentar');
-    wrap.append(h('div', { class: 'cm-form' }, ta, h('div', { class: 'cm-actions' }, h('button', { class: 'btn', type: 'button', onclick: () => fi.click() }, h('span', { svg: I.clip }), 'Adjuntar'), chosen, fi, send)));
+    wrap.append(dropTarget(h('div', { class: 'cm-form', title: 'Puedes arrastrar archivos aquí' }, ta, h('div', { class: 'cm-actions' }, h('button', { class: 'btn', type: 'button', onclick: () => fi.click() }, h('span', { svg: I.clip }), 'Adjuntar'), chosen, fi, send)), files => { pend = pend.concat(files); showP(); ta.focus(); }));
   }
   return wrap;
 }
@@ -1292,10 +1294,9 @@ const ACCEPT = '.html,.htm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,
 const EXT_COLOR = { pdf: '#B3261E', doc: '#003FF9', docx: '#003FF9', xls: '#3F886B', xlsx: '#3F886B', csv: '#3F886B', ppt: '#ED7F32', pptx: '#ED7F32', html: '#9648D9', htm: '#9648D9' };
 function drawFiles(p, body, after = () => openDrawer(p.id, 'files')) {
   const input = h('input', { type: 'file', multiple: true, accept: ACCEPT, class: 'hidden', id: 'file-input', onchange: e => upload(p, e.target.files, after) });
-  const drop = h('div', { class: 'drop', role: 'button', tabIndex: 0, onclick: () => input.click(),
-    ondragover: e => { e.preventDefault(); drop.classList.add('over'); }, ondragleave: () => drop.classList.remove('over'),
-    ondrop: e => { e.preventDefault(); drop.classList.remove('over'); upload(p, e.dataTransfer.files, after); } },
+  const drop = h('div', { class: 'drop', role: 'button', tabIndex: 0, onclick: () => input.click() },
     h('b', {}, 'Arrastra archivos o haz clic para cargar'), h('div', { class: 'muted' }, 'HTML, PDF, PowerPoint, Word, Excel e imágenes · máx. 25 MB'));
+  dropTarget(drop, files => upload(p, files, after)); dropTarget(body, files => upload(p, files, after));
   const list = S.attachments.filter(a => a.project_id === p.id);
   body.replaceChildren(h('div', {}, canEdit() ? h('div', {}, drop, input) : null, list.length ? list.map(a => {
     const ext = (a.name.split('.').pop() || '').toLowerCase();
@@ -1308,6 +1309,16 @@ function drawFiles(p, body, after = () => openDrawer(p.id, 'files')) {
         S.attachments = S.attachments.filter(x => x.id !== a.id); render(); after();
       } }) : null);
   }) : h('p', { class: 'muted' }, 'Sin archivos adjuntos.')));
+}
+// Arrastrar y soltar archivos: cualquier zona marcada; fuera de ellas el navegador no abre el archivo
+['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => { if (e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files')) e.preventDefault(); }));
+function dropTarget(el, onFiles) {
+  let n = 0; const isF = e => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+  el.addEventListener('dragenter', e => { if (!isF(e)) return; e.preventDefault(); n++; el.classList.add('drop-on'); });
+  el.addEventListener('dragover', e => { if (!isF(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  el.addEventListener('dragleave', e => { if (!isF(e)) return; n = Math.max(0, n - 1); if (!n) el.classList.remove('drop-on'); });
+  el.addEventListener('drop', e => { if (!isF(e)) return; e.preventDefault(); e.stopPropagation(); n = 0; el.classList.remove('drop-on'); if (e.dataTransfer.files.length && canEdit()) onFiles([...e.dataTransfer.files]); });
+  return el;
 }
 function uploadBar(name, size) {
   let box = $('#uploads'); if (!box) { box = h('div', { id: 'uploads', role: 'status', 'aria-live': 'polite' }); document.body.append(box); }

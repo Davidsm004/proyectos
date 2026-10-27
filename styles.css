@@ -580,3 +580,6 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 .sheet-prev table{border-collapse:collapse;font-size:12.5px;min-width:100%}
 .sheet-prev th{position:sticky;top:0;background:#002060;color:#fff;text-align:left}
 .sheet-prev th,.sheet-prev td{border:1px solid var(--line);padding:5px 8px;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}
+
+.drop-on{outline:3px dashed var(--blue)!important;outline-offset:-3px;background-color:rgba(0,128,232,.07)!important}
+tr.drop-on td{background:rgba(0,128,232,.1)!important}
