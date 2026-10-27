@@ -675,7 +675,7 @@ function colMenu(anchor, c) {
     { label: 'Ancho', run: async () => { const r = await ask('Ancho de columna', [{ name: 'w', label: 'Píxeles (30–900)', type: 'number', value: c.width }]); if (r) { c.width = Math.max(30, Math.min(900, num(r.w) || 150)); render(); await q(sb.from('columns').update({ width: c.width }).eq('id', c.id)); } } },
     ['status', 'label'].includes(c.type) && { label: 'Editar etiquetas', run: () => editLabels(c) },
     { label: 'Mover a la izquierda', run: () => moveCol(c, -1) }, { label: 'Mover a la derecha', run: () => moveCol(c, 1) },
-    !c.builtin && '-', !c.builtin && { label: 'Eliminar columna', danger: true, run: async () => {
+    '-', { label: 'Eliminar columna', danger: true, run: async () => {
       if (!await confirmBox('Eliminar columna', `¿Eliminar "${c.label}"? Los valores de esta columna quedarán ocultos.`)) return;
       await q(sb.from('columns').delete().eq('id', c.id)); S.columns = S.columns.filter(x => x.id !== c.id); render(); } }]);
 }
