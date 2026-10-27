@@ -363,6 +363,32 @@ async function delNote(n) {
   S.notes = S.notes.filter(x => x.id !== n.id); S.attachments = S.attachments.filter(a => a.project_id !== n.id); document.querySelector('.drawer')?.remove(); render(); toast('Nota eliminada', 'ok');
 }
 function renderDiary(m) { return renderKanban(m); }
+async function exportNotes() {
+  if (!window.ExcelJS) return toast('Cargando librería de Excel, intenta de nuevo', 'err');
+  const wb = new ExcelJS.Workbook(); wb.creator = 'Liberty Project Pipeline';
+  const fmt = S.settings.excel_format || { headerFill: 'FF0080E8', headerFont: 'FFFFFFFF' };
+  const head = ws => { const r = ws.getRow(1); r.height = 22; r.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fmt.headerFill } }; c.font = { bold: true, color: { argb: fmt.headerFont } }; c.alignment = { vertical: 'middle', horizontal: 'center' }; }); ws.views = [{ state: 'frozen', ySplit: 1 }]; ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: ws.columnCount } }; };
+  const wrap = { wrapText: true, vertical: 'top' };
+  const ns = wb.addWorksheet('Mis notas', { properties: { tabColor: { argb: 'FFED7F32' } } });
+  ns.columns = [{ header: 'Título', width: 34 }, { header: 'Nota', width: 80 }, { header: 'Resumen de lo más importante', width: 60 }, { header: 'Adjuntos', width: 34 }, { header: 'Creada', width: 18 }, { header: 'Actualizada', width: 18 }]; head(ns);
+  S.notes.filter(n => n.author === S.user.id).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at))).forEach(n => {
+    const r = ns.addRow([n.title || 'Sin título', n.body || '', summarize(n.body).map(s => '• ' + s).join('\n'), S.attachments.filter(x => x.project_id === n.id).map(x => x.name).join('\n'), n.created_at ? new Date(n.created_at) : null, n.updated_at ? new Date(n.updated_at) : null]);
+    r.eachCell(c => c.alignment = wrap); r.getCell(1).font = { bold: true }; r.getCell(5).numFmt = r.getCell(6).numFmt = 'dd/mm/yyyy hh:mm';
+  });
+  const ps = wb.addWorksheet('Pendientes por persona', { properties: { tabColor: { argb: 'FF0080E8' } } });
+  ps.columns = [{ header: 'Persona', width: 22 }, { header: 'Título', width: 44 }, { header: 'Descripción', width: 60 }, { header: 'Tipo', width: 10 }, { header: 'Estado', width: 13 }, { header: 'Fecha', width: 13 }]; head(ps);
+  for (const col of myCols()) for (const k of cardsOf(col.id)) {
+    const r = ps.addRow([col.name, k.title, k.body || '', k.is_task ? 'Tarea' : 'Nota', k.is_task ? (k.done ? 'Ejecutada' : 'Pendiente') : '', k.due ? new Date(k.due + 'T00:00:00Z') : null]);
+    r.eachCell({ includeEmpty: true }, c => c.alignment = wrap); r.getCell(6).numFmt = 'dd/mm/yyyy';
+    const pc = col.color.replace('#', ''); r.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + pc } }; r.getCell(1).font = { bold: true, color: { argb: textOn(col.color) === '#fff' ? 'FFFFFFFF' : 'FF2F333C' } };
+    const lc = lighten(col.color, .85).replace('#', ''); for (let i = 2; i <= 6; i++) r.getCell(i).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + lc } };
+    if (k.done) { r.getCell(2).font = { strike: true, color: { argb: 'FF84858A' } }; r.getCell(5).font = { bold: true, color: { argb: 'FF3F886B' } }; } else if (k.is_task) r.getCell(5).font = { bold: true, color: { argb: 'FF9A4A12' } };
+  }
+  const buf = await wb.xlsx.writeBuffer();
+  const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  const link = h('a', { href: url, download: `Mis_notas_${new Date().toISOString().slice(0, 10)}.xlsx` }); document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast('Excel de notas descargado', 'ok');
+}
 const fdate = d => d ? new Date(d).toLocaleString('es-CR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 function openNote(id) {
   document.querySelector('.drawer')?.remove();
@@ -452,7 +478,7 @@ function renderKanban(m) {
     oninput: e => { S.kq = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#kq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
   const cols = myCols();
   m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Mis notas'), h('p', { class: 'muted' }, 'Tus notas y los temas pendientes con cada persona · arrastra las cajitas entre personas')),
-    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, ro ? null : h('button', { class: 'btn', id: 'btn-note', onclick: newNote }, h('span', { svg: I.plus }), 'Nota'), ro ? null : h('button', { class: 'btn primary', id: 'btn-person', onclick: addPerson }, h('span', { svg: I.plus }), 'Persona'))),
+    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('button', { class: 'btn', id: 'btn-notes-xlsx', onclick: exportNotes }, h('span', { svg: I.down }), 'Exportar Excel'), ro ? null : h('button', { class: 'btn', id: 'btn-note', onclick: newNote }, h('span', { svg: I.plus }), 'Nota'), ro ? null : h('button', { class: 'btn primary', id: 'btn-person', onclick: addPerson }, h('span', { svg: I.plus }), 'Persona'))),
     h('div', { class: 'toolbar' }, h('div', { class: 'search' }, h('span', { svg: I.search }), search),
       h('label', { class: 'check', style: 'margin:0' }, h('input', { type: 'checkbox', checked: !!S.khide, onchange: e => { S.khide = e.target.checked; render(); } }), 'Ocultar ejecutadas')),
     h('div', { class: 'kanban' }, notesCol, cols.map(colEl), ro ? null : h('button', { class: 'kcol kaddcol', onclick: addPerson }, h('span', { svg: I.plus }), 'Agregar persona')));
