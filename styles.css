@@ -419,3 +419,15 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 .cm-actions{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
 .cm-actions small{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cm-actions .btn{padding:6px 10px}
+
+/* Tabla con su propia área de desplazamiento: barra horizontal siempre visible abajo y encabezado fijo */
+.tbl-wrap{max-height:calc(100vh - 110px);min-height:200px;overflow:auto;overscroll-behavior:contain}
+.board thead th{position:sticky;top:0;z-index:3;background:#FAFAFC}
+.board thead th.c-drag,.board thead th.c-name{z-index:5}
+.subbox .board thead th{position:sticky;top:0}
+.tbl-wrap::-webkit-scrollbar{height:14px;width:12px}
+.tbl-wrap::-webkit-scrollbar-track{background:var(--g100);border-radius:8px}
+.tbl-wrap::-webkit-scrollbar-thumb{background:var(--g500);border-radius:8px;border:3px solid var(--g100)}
+.tbl-wrap::-webkit-scrollbar-thumb:hover{background:var(--blue)}
+.tbl-wrap{scrollbar-width:auto;scrollbar-color:var(--g500) var(--g100)}
+@media (max-width:760px){.tbl-wrap{max-height:calc(100vh - 170px)}}
