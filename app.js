@@ -628,12 +628,12 @@ function renderBoard(m) {
 }
 function renderGroup(g) {
   const list = visibleTop(g.id), pc = cols('project'), collapsed = S.collapsed.has(g.id);
-  const head = h('div', { class: 'group-head', style: `--gc:${g.color}` },
+  const head = h('div', { class: 'group-head', style: `--gc:${g.color}` }, canEdit() ? h('span', { class: 'ggrip drag', svg: I.grip, title: 'Arrastra para mover el grupo arriba o abajo' }) : null,
     h('button', { class: 'icon-btn', 'aria-label': 'Contraer grupo', onclick: () => { collapsed ? S.collapsed.delete(g.id) : S.collapsed.add(g.id); render(); } }, h('span', { class: 'caret', style: collapsed ? '' : 'transform:rotate(90deg);display:inline-grid', svg: I.caret })),
     h('button', { class: 'gname', style: `color:${g.color}`, onclick: e => canEdit() && editGroupName(g) }, g.name),
     h('span', { class: 'count' }, `${list.length} proyecto${list.length === 1 ? '' : 's'}`),
     canEdit() ? h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones de grupo', onclick: e => menu(e.currentTarget, [
-      { label: 'Agregar proyecto', run: () => quickAdd(g.id) }, { label: 'Renombrar', run: () => editGroupName(g) },
+      { label: 'Agregar proyecto', run: () => quickAdd(g.id) }, { label: 'Subir grupo', run: () => moveGroup(g, -1) }, { label: 'Bajar grupo', run: () => moveGroup(g, 1) }, { label: 'Renombrar', run: () => editGroupName(g) },
       { label: 'Cambiar color', run: () => colorPicker(head, g.color, async c => { g.color = c || '#0080E8'; render(); await q(sb.from('groups').update({ color: g.color }).eq('id', g.id)); }) },
       '-', { label: 'Eliminar grupo', danger: true, run: () => delGroup(g) }]) }) : null);
   if (collapsed) return h('section', { class: 'group', 'data-group': g.id }, head);
@@ -926,6 +926,8 @@ async function addGroup() {
   const [row] = await q(sb.from('groups').insert({ name: r.name.trim(), color: PALETTE[S.groups.length % PALETTE.length], position: (S.groups.length ? Math.max(...S.groups.map(g => g.position)) : 0) + 1 }).select());
   S.groups.push(row); render();
 }
+async function saveGroupOrder(list) { list.forEach((g, i) => g.position = i + 1); render(); await Promise.all(list.map(g => q(sb.from('groups').update({ position: g.position }).eq('id', g.id)))); }
+function moveGroup(g, d) { const l = S.groups.slice().sort(byPos), i = l.indexOf(g), j = i + d; if (j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; saveGroupOrder(l); }
 async function editGroupName(g) { const r = await ask('Renombrar grupo', [{ name: 'name', label: 'Nombre', value: g.name, required: true }]); if (!r) return; g.name = r.name.trim(); render(); await q(sb.from('groups').update({ name: g.name }).eq('id', g.id)); }
 async function delGroup(g) {
   if (!await confirmBox('Eliminar grupo', `¿Eliminar "${g.name}" y todos sus proyectos?`)) return;
@@ -980,6 +982,9 @@ function editLabels(c) {
 /* ---------- drag & drop ---------- */
 function setupSortables(root) {
   if (!canEdit() || !window.Sortable) return;
+  const gw = root.querySelector('#groups');
+  if (gw) Sortable.create(gw, { handle: '.ggrip', draggable: 'section.group', animation: 150, forceFallback: true, ghostClass: 'kghost', onStart: () => { S.collapsedBefore = new Set(S.collapsed); }, onEnd: e => {
+    if (e.oldIndex === e.newIndex) return; saveGroupOrder([...gw.querySelectorAll(':scope > section.group')].map(s => S.groups.find(g => g.id === s.dataset.group)).filter(Boolean)); } });
   root.querySelectorAll('tbody[data-group]').forEach(tb => Sortable.create(tb, { group: 'rows', handle: '.drag', draggable: 'tr.prow', animation: 150, onStart: () => closePop(), onEnd: e => onRowsDrop(e) }));
   root.querySelectorAll('tbody[data-parent]').forEach(tb => Sortable.create(tb, { handle: '.drag', draggable: 'tr.srow', animation: 150, onEnd: e => onSubDrop(e.to) }));
   root.querySelectorAll('thead tr[data-scope]').forEach(tr => Sortable.create(tr, { draggable: 'th.dcol', filter: 'button,.rz', preventOnFilter: false, animation: 150, onEnd: e => {

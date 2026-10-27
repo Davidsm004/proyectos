@@ -430,3 +430,6 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 .tbl-wrap::-webkit-scrollbar{height:14px}
 .tbl-wrap::-webkit-scrollbar-thumb{background:var(--g500);border-radius:8px;border:3px solid #fff}
 @media (max-width:760px){#hbar{bottom:calc(64px + env(safe-area-inset-bottom))}}
+
+.ggrip{width:20px;height:28px!important;cursor:grab;flex:none}
+.group-head .ggrip svg{width:16px;height:16px}
