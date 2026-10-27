@@ -110,7 +110,7 @@ function createClient(cfg) {
           }
           if (!done) throw new Error('Conflicto al guardar: intenta de nuevo');
         }
-      } catch (e) { queue = []; notifyErr(e); try { const cur = await readData(); T = cur.db; sha = cur.sha; changeCbs.forEach(f => f()); } catch (x) {} }
+      } catch (e) { notifyErr(new Error('No se pudo guardar todavía (' + e.message + '). Tus cambios se mantienen y se reintentará en 15 s.')); clearTimeout(timer); timer = setTimeout(flush, 15000); }
       finally { flushing = null; }
     })();
     return flushing;

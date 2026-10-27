@@ -203,7 +203,7 @@ function subscribe() {
   if (!sb.channel) return;
   sb.channel('lpp').on('changes', {}, () => {
     clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(async () => { const a = document.activeElement; if (a && a.closest && a.closest('.cell,.add-row,.overlay,.drawer,.diary')) return; await loadAll(); render(); }, 800);
+    reloadTimer = setTimeout(async () => { const a = document.activeElement; if (a && a.closest && (a.closest('.cell,.add-row,.overlay,.drawer,.diary,.name-cell,.posc,.pop') || /INPUT|TEXTAREA|SELECT/.test(a.tagName))) return; await loadAll(); render(); }, 800);
   }).subscribe();
 }
 
@@ -225,7 +225,10 @@ function renderShell() {
   render();
 }
 function go(v) { S.view = v; renderShell(); scrollTo(0, 0); hbar.update(); }
+let rendering = false;
 function render() {
+  const ae = document.activeElement;
+  if (!rendering && ae && ae.classList && ae.classList.contains('inl') && document.contains(ae)) { rendering = true; try { ae.blur(); } finally { rendering = false; } }
   updateBell();
   const m = $('#main'); if (!m) return;
   if (S.view === 'new') return renderNew(m);
@@ -384,7 +387,7 @@ function notifPanel(anchor) {
 
 /* ---------- bloqueo por inactividad (10 min) ---------- */
 let lockTimer;
-function resetLock() { if (!S.user || document.getElementById('lockscreen')) return; clearTimeout(lockTimer); lockTimer = setTimeout(lockScreen, 10 * 60 * 1000); }
+function resetLock() { if (!S.user || document.getElementById('lockscreen')) return; clearTimeout(lockTimer); lockTimer = setTimeout(lockScreen, 3 * 60 * 1000); }
 ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel', 'scroll'].forEach(ev => document.addEventListener(ev, resetLock, { passive: true, capture: true }));
 function lockScreen() {
   if (!S.user || document.getElementById('lockscreen')) return;
@@ -400,7 +403,7 @@ function lockScreen() {
   };
   inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') unlock(); });
   const card = h('div', { class: 'lock-card' }, h('img', { src: 'logo-white.png', alt: 'Liberty', class: 'lock-logo' }), clock, h('div', { class: 'lock-date' }, clock.dataset.d),
-    h('div', { class: 'lock-ico', svg: I.lock }), h('h2', {}, 'Bloqueo de pantalla'), h('p', {}, 'La sesión se bloqueó por 10 minutos de inactividad. Escribe la palabra clave para continuar.'),
+    h('div', { class: 'lock-ico', svg: I.lock }), h('h2', {}, 'Bloqueo de pantalla'), h('p', {}, 'La sesión se bloqueó por 3 minutos de inactividad. Escribe la palabra clave para continuar.'),
     h('form', { onsubmit: e => { e.preventDefault(); unlock(); } }, inp, h('button', { class: 'btn accent block', type: 'submit' }, 'Desbloquear')), msg,
     h('button', { class: 'link lock-out', type: 'button', onclick: () => { clearInterval(iv); el.remove(); sb.auth.signOut(); } }, 'Cerrar sesión'));
   const el = h('div', { id: 'lockscreen', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Bloqueo de pantalla' }, card);
@@ -828,7 +831,7 @@ function posEditor(p) {
   const n = num(p.data.pos);
   const b = h('button', { class: 'pos' + (n == null ? ' empty' : ''), title: canEdit() ? 'Posición · clic para asignarla' : 'Posición', disabled: !canEdit(), onclick: e => {
     e.stopPropagation();
-    const inp = h('input', { type: 'number', min: 1, value: n ?? '', class: 'pos-in', 'aria-label': 'Posición' });
+    const inp = h('input', { type: 'number', min: 1, value: n ?? '', class: 'pos-in inl', 'aria-label': 'Posición' });
     let done = false; const fin = async ok => { if (done) return; done = true; const v = inp.value.trim() === '' ? null : Math.max(1, Math.round(num(inp.value) || 1)); if (ok && v !== n) await setPos(p, v); else render(); };
     inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') fin(true); if (ev.key === 'Escape') fin(false); }); inp.addEventListener('blur', () => fin(true));
     b.replaceWith(inp); inp.focus(); inp.select();
@@ -870,7 +873,7 @@ function nameEditor(p) {
   const sp = h('span', { class: 'nm', tabIndex: 0, 'data-key': 'name', title: p.data.name || '' }, p.data.name || 'Sin nombre');
   if (!canEdit()) return sp;
   const start = () => {
-    const inp = h('input', { class: 'input', value: p.data.name || '', style: 'padding:5px 6px;font-size:13px', 'aria-label': 'Nombre' });
+    const inp = h('input', { class: 'input inl', value: p.data.name || '', style: 'padding:5px 6px;font-size:13px', 'aria-label': 'Nombre' });
     let done = false;
     const fin = async save => { if (done) return; done = true; const v = inp.value.trim(); if (save && v && v !== p.data.name) await patch(p, { name: v }); else render(); };
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') fin(true); if (e.key === 'Escape') fin(false); });
@@ -928,7 +931,7 @@ function inlineInput(p, c, content, cls, kind) {
       popEl.classList.add('wide'); ta.style.height = Math.min(innerHeight * .6, ta.scrollHeight + 6) + 'px'; { const r = d.getBoundingClientRect(), pw = popEl.offsetWidth, ph = popEl.offsetHeight; popEl.style.left = Math.max(8, Math.min(r.left, innerWidth - pw - 8)) + 'px'; let y = r.bottom + 4; if (y + ph > innerHeight - 8) y = Math.max(8, r.top - ph - 4); popEl.style.top = y + 'px'; }
       ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); return;
     }
-    const inp = h('input', { type: kind, value: typeof init === 'string' && kind !== 'date' ? init : cur, step: 'any', 'aria-label': c.label, min: c.type === 'progress' ? 0 : null, max: c.type === 'progress' ? 100 : null });
+    const inp = h('input', { class: 'inl', type: kind, value: typeof init === 'string' && kind !== 'date' ? init : cur, step: 'any', 'aria-label': c.label, min: c.type === 'progress' ? 0 : null, max: c.type === 'progress' ? 100 : null });
     let done = false;
     const fin = async save => {
       if (done) return; done = true;
