@@ -30,6 +30,8 @@ const I = {
   down: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v10M4 9l4 4 4-4"/></svg>',
   list: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4h12M2 8h12M2 12h12"/></svg>',
   book: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 2.5h7.5A2.5 2.5 0 0113 5v8.5H5.5A2.5 2.5 0 013 11z"/><path d="M3 11a2 2 0 012-2h8"/></svg>',
+  moon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13.5 9.5A5.5 5.5 0 016.5 2.5a5.5 5.5 0 107 7z"/></svg>',
+  sun: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3"/></svg>',
   bell: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 11V7a4 4 0 018 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.6 1.6 0 003 0"/></svg>',
   lock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/></svg>',
   edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 2l3 3-8 8H3v-3z"/></svg>'
@@ -88,7 +90,7 @@ function visibleTop(gid) {
 }
 function totals(list) {
   let ret = 0, cost = 0, prog = 0;
-  for (const p of list) { ret += moneyOf(p, 'return').v || 0; cost += moneyOf(p, 'dev_cost').v || 0; prog += progressOf(p).v; }
+  for (const p of list) { ret += moneyOf(p, 'return').v || 0; cost += (moneyOf(p, 'dev_cost').v || 0) + (moneyOf(p, 'costo').v || 0); prog += progressOf(p).v; }
   return { ret, cost, net: ret - cost, prog: list.length ? prog / list.length : 0, n: list.length };
 }
 
@@ -214,7 +216,7 @@ function renderShell() {
         h('button', { id: 'nav-new', class: S.view === 'new' ? 'on' : '', onclick: () => go('new') }, h('span', { svg: I.plus }), 'Ingresar proyectos'),
         h('button', { id: 'nav-board', class: S.view === 'board' ? 'on' : '', onclick: () => go('board') }, h('span', { svg: I.list }), 'Ver proyectos'),
         h('button', { id: 'nav-diary', class: S.view === 'diary' ? 'on' : '', onclick: () => go('diary') }, h('span', { svg: I.book }), 'Mis notas')),
-      h('div', { class: 'right' }, h('button', { class: 'icon-btn bell', id: 'bell', 'aria-label': 'Notificaciones', title: 'Notificaciones', onclick: e => notifPanel(e.currentTarget) }, h('span', { svg: I.bell }), h('b', { id: 'bell-n', class: 'hidden' })), h('span', { class: 'role-chip' }, p.role),
+      h('div', { class: 'right' }, h('button', { class: 'icon-btn bell', id: 'theme-btn', 'aria-label': 'Modo noche', title: 'Modo noche / día', onclick: toggleTheme }, h('span', { svg: document.documentElement.dataset.theme === 'dark' ? I.sun : I.moon })), h('button', { class: 'icon-btn bell', id: 'bell', 'aria-label': 'Notificaciones', title: 'Notificaciones', onclick: e => notifPanel(e.currentTarget) }, h('span', { svg: I.bell }), h('b', { id: 'bell-n', class: 'hidden' })), h('span', { class: 'role-chip' }, p.role),
         h('button', { class: 'icon-btn', style: 'width:auto;height:auto', title: p.email, 'aria-label': 'Cuenta', onclick: e => menu(e.currentTarget, [
           { label: p.email, run: () => {} }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
           h('span', { class: 'avatar', style: `background:${hashColor(p.email)}` }, initials(p.email))))),
@@ -585,6 +587,89 @@ function renderKanban(m) {
   } });
 }
 
+/* ---------- modo noche ---------- */
+function applyTheme() { let t = null; try { t = localStorage.getItem('lpp-theme'); } catch (e) {} document.documentElement.dataset.theme = t || 'light'; }
+function toggleTheme() { const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('lpp-theme', t); } catch (e) {} applyTheme(); if (S.user) renderShell(); }
+applyTheme();
+
+/* ---------- cronograma tipo Project (Gantt) ---------- */
+const DAY = 864e5, dOf = s => { const d = new Date(String(s).slice(0, 10) + 'T00:00:00'); return isNaN(d) ? null : d; }, iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+function renderGantt() {
+  const gs = S.groups.slice().sort(byPos).filter(g => S.kg === 'all' || g.id === S.kg || true);
+  const PX = { day: 30, week: 12, month: 4 }[S.gz || 'week'], RH = 34, LW = innerWidth < 760 ? 260 : 600;
+  S.gclosed = S.gclosed || new Set();
+  const rows = [];
+  gs.forEach((g, gi) => {
+    const tops = visibleTop(g.id); if (!tops.length) return;
+    rows.push({ kind: 'group', g, wbs: String(gi + 1), name: g.name, color: g.color, items: tops.flatMap(p => [p, ...subsOf(p.id)]) });
+    if (S.gclosed.has(g.id)) return;
+    tops.forEach((p, pi) => {
+      const subs = subsOf(p.id);
+      rows.push({ kind: 'proj', p, g, wbs: `${gi + 1}.${pi + 1}`, color: p.color || g.color, subs });
+      if (!S.gclosed.has(p.id)) subs.forEach((s, si) => rows.push({ kind: 'sub', p: s, parent: p, g, wbs: `${gi + 1}.${pi + 1}.${si + 1}`, color: s.color || (p.color ? lighten(p.color, .35) : lighten(g.color, .35)) }));
+    });
+  });
+  const span = list => { let a = null, b = null; list.forEach(x => { const s = dOf(x.data.start), e = dOf(x.data.end) || s; const s2 = s || e; if (s2 && (!a || s2 < a)) a = s2; if (e && (!b || e > b)) b = e; }); return a ? [a, b || a] : null; };
+  const range = (r) => r.kind === 'group' ? span(r.items) : (r.kind === 'proj' && !r.p.data.start && !r.p.data.end && r.subs.length) ? span(r.subs) : span([r.p]);
+  let min = null, max = null; rows.forEach(r => { const x = range(r); if (x) { if (!min || x[0] < min) min = x[0]; if (!max || x[1] > max) max = x[1]; } });
+  const today = new Date(new Date().toDateString());
+  if (!min) { min = new Date(today.getTime() - 7 * DAY); max = new Date(today.getTime() + 60 * DAY); }
+  min = new Date(Math.min(min, today) - 7 * DAY); max = new Date(Math.max(max, today) + 21 * DAY);
+  if (S.gz === 'month') { min = new Date(min.getFullYear(), min.getMonth(), 1); } else { const wd = (min.getDay() + 6) % 7; min = new Date(min.getTime() - wd * DAY); }
+  const days = Math.round((max - min) / DAY) + 1, TW = days * PX, x = d => Math.round((d - min) / DAY) * PX;
+  // encabezado de 2 niveles
+  const top = h('div', { class: 'gt-top' }), bot = h('div', { class: 'gt-bot' });
+  const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'], DIA = ['D', 'L', 'K', 'M', 'J', 'V', 'S'];
+  for (let d = new Date(min); d <= max;) {
+    if (S.gz === 'month') { const n = new Date(d.getFullYear(), d.getMonth() + 1, 1), w = Math.min(n, new Date(max.getTime() + DAY)) - d; top.append(h('span', { style: `left:${x(d)}px;width:${Math.round(w / DAY) * PX}px` }, d.getFullYear())); bot.append(h('span', { style: `left:${x(d)}px;width:${Math.round(w / DAY) * PX}px` }, MES[d.getMonth()])); d = n; }
+    else if (S.gz === 'day') { if (d.getDay() === 1 || +d === +min) top.append(h('span', { style: `left:${x(d)}px;width:${7 * PX}px` }, `${d.getDate()} ${MES[d.getMonth()]} '${String(d.getFullYear()).slice(2)}`)); bot.append(h('span', { class: d.getDay() % 6 === 0 ? 'we' : '', style: `left:${x(d)}px;width:${PX}px` }, DIA[d.getDay()])); d = new Date(d.getTime() + DAY); }
+    else { if (d.getDate() <= 7 || +d === +min) top.append(h('span', { style: `left:${x(d)}px;width:${Math.min(35, days) * PX}px` }, `${MES[d.getMonth()]} ${d.getFullYear()}`)); bot.append(h('span', { style: `left:${x(d)}px;width:${7 * PX}px` }, d.getDate())); d = new Date(d.getTime() + 7 * DAY); }
+  }
+  const bg = S.gz === 'month' ? '' : `background-image:repeating-linear-gradient(90deg,transparent 0 ${(S.gz === 'day' ? 5 : 5) * PX}px,var(--gwe) ${5 * PX}px ${7 * PX}px);background-position:${x(min) + ((8 - ((min.getDay() + 6) % 7 + 1)) % 7 >= 0 ? 0 : 0)}px 0`;
+  const fmt = d => d ? d.toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: '2-digit' }) : '';
+  const grid = h('div', { class: 'gantt', style: `--rh:${RH}px;--lw:${LW}px` });
+  const inner = h('div', { class: 'g-in', style: `width:${LW + TW}px` });
+  inner.append(h('div', { class: 'g-row g-head' },
+    h('div', { class: 'g-left' }, h('span', { class: 'gc-w' }, '#'), h('span', { class: 'gc-n' }, 'Nombre de tarea'), h('span', { class: 'gc-p' }, 'Responsable'), h('span', { class: 'gc-d' }, 'Inicio'), h('span', { class: 'gc-d' }, 'Fin'), h('span', { class: 'gc-pc' }, '%')),
+    h('div', { class: 'g-right', style: `width:${TW}px` }, top, bot)));
+  const body = h('div', { class: 'g-body', style: `width:${LW + TW}px` });
+  rows.forEach(r => {
+    const rg = range(r), p = r.p, pr = r.kind === 'group' ? (r.items.length ? r.items.filter(i => !i.parent_id).reduce((s, i) => s + progressOf(i).v, 0) / Math.max(1, r.items.filter(i => !i.parent_id).length) : 0) : r.kind === 'sub' ? subProgress(p) : progressOf(p).v;
+    const who = r.kind === 'group' ? '' : personsOf(p.data.responsable || p.data.encargado).join(', ');
+    const closable = r.kind === 'group' || (r.kind === 'proj' && r.subs.length), cid = r.kind === 'group' ? r.g.id : p?.id;
+    const left = h('div', { class: 'g-left' }, h('span', { class: 'gc-w' }, r.wbs),
+      h('span', { class: 'gc-n lvl-' + r.kind, style: `--c:${r.color}` },
+        closable ? h('button', { class: 'g-tg', 'aria-label': 'Contraer', onclick: () => { S.gclosed.has(cid) ? S.gclosed.delete(cid) : S.gclosed.add(cid); render(); } }, S.gclosed.has(cid) ? '⊞' : '⊟') : h('i', { class: 'g-sp' }),
+        h('button', { class: 'g-name', title: r.kind === 'group' ? r.name : (p.data.name || ''), onclick: () => r.kind !== 'group' && openDrawer(p.id, 'details') }, r.kind === 'group' ? r.name : (p.data.name || 'Sin nombre'))),
+      h('span', { class: 'gc-p', title: who }, who), h('span', { class: 'gc-d' }, rg ? fmt(rg[0]) : '—'), h('span', { class: 'gc-d' }, rg ? fmt(rg[1]) : '—'), h('span', { class: 'gc-pc' }, Math.round(pr) + '%'));
+    const right = h('div', { class: 'g-right', style: `width:${TW}px;${bg}` });
+    if (rg) {
+      const L = x(rg[0]), W = Math.max(PX, x(rg[1]) - L + PX), summary = r.kind === 'group' || (r.kind === 'proj' && !p.data.start && !p.data.end && r.subs.length);
+      if (summary) right.append(h('div', { class: 'g-sum', style: `left:${L}px;width:${W}px;--c:${r.color}` }));
+      else {
+        const bar = h('div', { class: 'g-bar' + (r.kind === 'sub' ? ' sub' : ''), style: `left:${L}px;width:${W}px;--c:${r.color}`, title: `${p.data.name}: ${fmt(rg[0])} → ${fmt(rg[1])} · ${Math.round(pr)}%` },
+          h('i', { style: `width:${pr}%` }), canEdit() ? h('span', { class: 'g-rs', title: 'Cambiar duración' }) : null);
+        right.append(bar, h('span', { class: 'g-lab', style: `left:${L + W + 6}px` }, [who, pr ? Math.round(pr) + '%' : ''].filter(Boolean).join(' · ')));
+        if (canEdit()) bar.addEventListener('pointerdown', e => {
+          const resize = e.target.classList.contains('g-rs'), x0 = e.clientX, L0 = L, W0 = W; let dd = 0;
+          dragPointer(e, ev => { dd = Math.round((ev.clientX - x0) / PX); if (resize) bar.style.width = Math.max(PX, W0 + dd * PX) + 'px'; else bar.style.left = (L0 + dd * PX) + 'px'; },
+            () => { if (!dd) return openDrawer(p.id, 'details'); const s = dOf(p.data.start) || rg[0], en = dOf(p.data.end) || rg[1];
+              const ns = resize ? s : new Date(s.getTime() + dd * DAY), ne = new Date(en.getTime() + dd * DAY); if (ne < ns) return render();
+              patch(p, { start: iso(ns), end: iso(ne) }); });
+        });
+      }
+    } else if (r.kind !== 'group' && canEdit()) right.append(h('button', { class: 'g-add', style: `left:${x(today)}px`, onclick: () => patch(p, { start: iso(today), end: iso(new Date(today.getTime() + 6 * DAY)) }) }, '+ Programar'));
+    body.append(h('div', { class: 'g-row g-' + r.kind }, left, right));
+  });
+  body.append(h('div', { class: 'g-today', style: `left:${LW + x(today) + PX / 2}px`, title: 'Hoy' }));
+  inner.append(body); grid.append(inner);
+  const zoom = h('div', { class: 'seg', 'aria-label': 'Escala' }, [['day', 'Días'], ['week', 'Semanas'], ['month', 'Meses']].map(([k, l]) => h('button', { class: (S.gz || 'week') === k ? 'on' : '', onclick: () => { S.gz = k; render(); } }, l)));
+  const wrap = h('section', { class: 'gantt-card' }, h('div', { class: 'g-tools' }, zoom, h('button', { class: 'btn', onclick: () => { const el = grid; el.scrollLeft = Math.max(0, x(today) - 200); } }, 'Ir a hoy'),
+    h('span', { class: 'muted' }, rows.length ? 'Clic en el nombre para editar · ⊟ contrae' : 'No hay proyectos que mostrar.')), grid);
+  setTimeout(() => { if (!grid._init) { grid._init = 1; grid.scrollLeft = Math.max(0, x(today) - 220); } }, 0);
+  return wrap;
+}
+
 /* ---------- tamaño de letra (por usuario/navegador) ---------- */
 function getFs() { try { return Number(localStorage.getItem('lpp-fs')) || 13; } catch (e) { return 13; } }
 function applyFs() { document.documentElement.style.setProperty('--fs', getFs() + 'px'); }
@@ -601,7 +686,7 @@ function renderBoard(m) {
     h('button', { class: S.kg === 'all' ? 'on' : '', role: 'tab', onclick: () => { S.kg = 'all'; render(); } }, 'Todos los grupos')) : null;
   const kpis = h('section', { class: 'kpis', 'aria-label': 'Indicadores' },
     h('div', { class: 'kpi g' }, h('div', { class: 'l' }, 'Retorno total'), h('div', { class: 'v', id: 'k-ret' }, fmtMoney(t.ret)), h('div', { class: 's' }, `${t.n} proyectos`)),
-    h('div', { class: 'kpi o' }, h('div', { class: 'l' }, 'Costo de desarrollo'), h('div', { class: 'v', id: 'k-cost' }, fmtMoney(t.cost)), h('div', { class: 's' }, 'USD')),
+    h('div', { class: 'kpi o' }, h('div', { class: 'l' }, 'Costo total'), h('div', { class: 'v', id: 'k-cost' }, fmtMoney(t.cost)), h('div', { class: 's' }, 'Costo + costo de desarrollo')),
     h('div', { class: 'kpi' }, h('div', { class: 'l' }, 'Balance neto'), h('div', { class: 'v', id: 'k-net', style: t.net < 0 ? 'color:#B3261E' : '' }, fmtMoney(t.net)), h('div', { class: 's' }, 'Retorno − costo')),
     h('div', { class: 'kpi p' }, h('div', { class: 'l' }, 'Avance promedio'), h('div', { class: 'v', id: 'k-prog' }, Math.round(t.prog) + '%'), h('div', { class: 'bar' }, h('i', { style: `width:${t.prog}%` }))),
     h('div', { class: 'kpi r' + (canEdit() ? ' click' : ''), title: canEdit() ? 'Editar meta' : '', onclick: canEdit() ? editMeta : null },
@@ -625,8 +710,13 @@ function renderBoard(m) {
     canEdit() ? h('button', { class: 'btn', id: 'btn-group', onclick: addGroup }, '+ Grupo') : null,
     canEdit() ? h('button', { class: 'btn', onclick: importExcelModal }, h('span', { svg: I.up }), 'Importar') : null,
     h('button', { class: 'btn', id: 'btn-export', onclick: exportExcel }, h('span', { svg: I.down }), 'Exportar'));
+  const vsel = h('div', { class: 'seg', role: 'tablist', 'aria-label': 'Vista' }, [['table', 'Tabla'], ['gantt', 'Cronograma']].map(([k, l]) => h('button', { class: (S.bview || 'table') === k ? 'on' : '', role: 'tab', id: 'v-' + k, onclick: () => { S.bview = k; render(); } }, l)));
+  if (S.bview === 'gantt') {
+    m.replaceChildren(h('div', { class: 'page-head hero' }, h('div', {}, h('h1', {}, 'Cronograma'), h('p', {}, 'Arrastra una barra para mover fechas · arrastra su borde derecho para cambiar la duración')), vsel), kgSel, kpis, tb, renderGantt());
+    return;
+  }
   const groups = S.groups.slice().sort(byPos).map(renderGroup);
-  m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Pipeline de proyectos'), h('p', { class: 'muted' }, 'Haz clic en cualquier celda para editar · arrastra filas y columnas para reordenar'))),
+  m.replaceChildren(h('div', { class: 'page-head hero' }, h('div', {}, h('h1', {}, 'Pipeline de proyectos'), h('p', {}, 'Haz clic en cualquier celda para editar · arrastra filas y columnas para reordenar')), vsel),
     kgSel, kpis, tb, h('div', { id: 'groups' }, groups.length ? groups : h('div', { class: 'empty-state' }, 'Aún no hay grupos. ', canEdit() ? h('button', { class: 'btn primary', onclick: addGroup }, 'Crear grupo') : null)));
   setupSortables(m);
 }
