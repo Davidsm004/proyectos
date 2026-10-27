@@ -488,7 +488,7 @@ function saveNote(n, now) {
   if (now) return go(); noteTimer = setTimeout(go, 700);
 }
 async function newNote() {
-  const [row] = await q(sb.from('notes').insert({ title: '', body: '', author: S.user.id, updated_at: new Date().toISOString() }).select());
+  const [row] = await q(sb.from('notes').insert({ title: '', body: '', author: S.user.id, col_id: null, position: Math.min(0, ...S.notes.map(n => n.position || 0)) - 1000, updated_at: new Date().toISOString() }).select());
   S.notes.push(row); render(); openNote(row.id); setTimeout(() => $('#note-title')?.focus(), 50);
 }
 async function delNote(n) {
@@ -537,7 +537,7 @@ function openNote(id) {
   const files = h('div', {}); drawFiles(cur, files, () => { render(); openNote(cur.id); });
   const dr = h('aside', { class: 'drawer note-drawer', role: 'dialog', 'aria-label': 'Nota' },
     h('div', { class: 'drawer-head' }, h('input', { class: 'input note-title', id: 'note-title', value: cur.title || '', placeholder: 'Título', disabled: ro, 'aria-label': 'Título', oninput: e => { cur.title = e.target.value; saveNote(cur); } }),
-      ro ? null : h('button', { class: 'btn primary', id: 'note-save', onclick: async e => { e.currentTarget.disabled = true; await saveNote(cur, true); toast('Nota guardada', 'ok'); e.currentTarget.disabled = false; render(); } }, 'Guardar'),
+      ro ? null : h('button', { class: 'btn primary', id: 'note-save', onclick: async e => { e.currentTarget.disabled = true; await saveNote(cur, true); toast('Nota guardada', 'ok'); dr.remove(); render(); } }, 'Guardar'),
       h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: async () => { if (!ro) await saveNote(cur, true); dr.remove(); render(); } })),
     h('div', { class: 'drawer-body' },
       h('p', { class: 'muted', style: 'margin:0 0 10px;display:flex;gap:8px;flex-wrap:wrap' }, h('span', {}, 'Creada ' + fdate(cur.created_at)), h('span', { id: 'note-state', class: 'note-state ok' }, '✓ Guardado')),
@@ -584,12 +584,21 @@ async function cardForm(col, k) {
   else { const [row] = await q(sb.from('kcards').insert({ ...v, col_id: col.id, position: nextPos(cardsOf(col.id)), author: S.user.id }).select()); S.kcards.push(row); render(); }
 }
 async function setCard(k, v) { Object.assign(k, v); render(); await q(sb.from('kcards').update(v).eq('id', k.id)); }
+function mixItems(cards, notes) { return [...cards.map(x => ({ kind: 'card', x })), ...notes.map(x => ({ kind: 'note', x }))].sort((a, b) => ((a.x.position ?? 0) - (b.x.position ?? 0)) || String(b.x.updated_at || b.x.created_at).localeCompare(String(a.x.updated_at || a.x.created_at))); }
+function noteCard(n, color) {
+  const na = S.attachments.filter(x => x.project_id === n.id).length, nc = S.comments.filter(c => c.project_id === n.id).length, b = String(n.body || '');
+  return h('div', { class: 'kcard knote', 'data-id': n.id, 'data-kind': 'note', style: `--pc:${color};cursor:pointer`, role: 'button', tabIndex: 0, onclick: () => { if (Date.now() - (S.dragT || 0) > 400) openNote(n.id); }, onkeydown: e => { if (e.key === 'Enter') openNote(n.id); } },
+    h('b', { class: 'ktitle' }, n.title || 'Sin título'), b ? h('p', { class: 'kbody' + (S.kexp?.has(n.id) ? ' open' : '') }, b) : null,
+    b.length > 120 ? h('button', { class: 'kmore', onclick: e => { e.stopPropagation(); S.kexp = S.kexp || new Set(); S.kexp.has(n.id) ? S.kexp.delete(n.id) : S.kexp.add(n.id); render(); } }, S.kexp?.has(n.id) ? 'Ver menos ▴' : 'Ver más ▾') : null,
+    h('div', { class: 'kfoot' }, h('span', { class: 'ktag' }, '📝 Nota'), na ? h('span', { class: 'ktag' }, '📎 ' + na) : null, nc ? h('span', { class: 'ktag' }, '💬 ' + nc) : null,
+      h('span', { class: 'kdue' }, new Date(n.updated_at || n.created_at).toLocaleDateString('es-CR', { day: 'numeric', month: 'short' }))));
+}
 function renderKanban(m) {
   const ro = !canEdit(), qq = norm(S.kq || '');
-  const match = k => !qq || norm(k.title).includes(qq) || norm(k.body).includes(qq);
+  const match = k => !qq || norm(k.title).includes(qq) || norm(k.body).includes(qq), matchN = match;
   const card = (k, col) => {
     const due = k.due ? new Date(k.due + 'T00:00') : null, late = due && !k.done && due < new Date(new Date().toDateString());
-    return h('div', { class: 'kcard' + (k.done ? ' done' : ''), 'data-id': k.id, style: `--pc:${col.color}` },
+    return h('div', { class: 'kcard' + (k.done ? ' done' : ''), 'data-id': k.id, 'data-kind': 'card', style: `--pc:${col.color}` },
       h('div', { class: 'kcard-top' },
         k.is_task ? h('input', { type: 'checkbox', class: 'kchk', checked: !!k.done, disabled: ro, title: k.done ? 'Ejecutada' : 'Marcar como ejecutada', 'aria-label': 'Ejecutada', onclick: e => e.stopPropagation(), onchange: e => setCard(k, { done: e.target.checked }) }) : null,
         h('b', { class: 'ktitle', onclick: () => !ro && cardForm(col, k) }, k.title || 'Sin título'),
@@ -622,17 +631,15 @@ function renderKanban(m) {
           '-', { label: 'Eliminar persona', danger: true, run: async () => { if (!await confirmBox('Eliminar persona', `¿Eliminar a "${col.name}" y sus ${cards.length} cajitas?`)) return;
             S.kcards = S.kcards.filter(k => k.col_id !== col.id); S.kcols = S.kcols.filter(x => x.id !== col.id); render();
             for (const k of cards) await q(sb.from('kcards').delete().eq('id', k.id)); await q(sb.from('kcols').delete().eq('id', col.id)); } }]) })),
-      h('div', { class: 'kcards', 'data-col': col.id }, shown.filter(k => !(S.khide && k.done)).map(k => card(k, col))),
+      h('div', { class: 'kcards', 'data-col': col.id }, mixItems(shown.filter(k => !(S.khide && k.done)), S.notes.filter(n => n.author === S.user.id && n.col_id === col.id && matchN(n))).map(it => it.kind === 'note' ? noteCard(it.x, col.color) : card(it.x, col))),
       ro ? null : h('button', { class: 'kadd', onclick: () => cardForm(col) }, h('span', { svg: I.plus }), 'Agregar'));
   };
-  const notes = S.notes.filter(n => n.author === S.user.id && (!qq || norm(n.title).includes(qq) || norm(n.body).includes(qq))).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
+  const notes = S.notes.filter(n => n.author === S.user.id && !n.col_id && matchN(n)), ncards = cardsOf('notes').filter(match).filter(k => !(S.khide && k.done));
+  const NCOL = { id: 'notes', name: 'Mis notas', color: '#ED7F32' };
   const ntl = kColTools('notes', 'Mis notas');
-  const notesCol = kC('notes') ? kCollapsed('notes', 'Mis notas', '#ED7F32', notes.length, h('span', { class: 'kavatar', svg: I.book })) : h('section', { class: 'kcol knotes', style: `--pc:#ED7F32;flex-basis:${kW('notes')}px` }, ntl.rz,
-    h('header', { class: 'kcol-head' }, h('span', { class: 'kavatar', svg: I.book }), h('span', { class: 'kname', style: 'cursor:default' }, 'Mis notas'), h('span', { class: 'kcount' }, notes.length), ntl.col),
-    h('div', { class: 'kcards' }, notes.map(n => { const na = S.attachments.filter(x => x.project_id === n.id).length, b = String(n.body || '');
-      return h('div', { class: 'kcard knote', style: 'cursor:pointer', role: 'button', tabIndex: 0, onclick: () => openNote(n.id), onkeydown: e => { if (e.key === 'Enter') openNote(n.id); } },
-        h('b', { class: 'ktitle' }, n.title || 'Sin título'), b ? h('p', { class: 'kbody' + (S.kexp?.has(n.id) ? ' open' : '') }, b) : null, b.length > 120 ? h('button', { class: 'kmore', onclick: e => { e.stopPropagation(); S.kexp = S.kexp || new Set(); S.kexp.has(n.id) ? S.kexp.delete(n.id) : S.kexp.add(n.id); render(); } }, S.kexp?.has(n.id) ? 'Ver menos ▴' : 'Ver más ▾') : null,
-        h('div', { class: 'kfoot' }, h('span', { class: 'ktag' }, 'Nota'), na ? h('span', { class: 'ktag' }, '📎 ' + na) : null, S.comments.some(c => c.project_id === n.id) ? h('span', { class: 'ktag' }, '💬 ' + S.comments.filter(c => c.project_id === n.id).length) : null, h('span', { class: 'kdue' }, new Date(n.updated_at).toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })))); })),
+  const notesCol = kC('notes') ? kCollapsed('notes', 'Mis notas', '#ED7F32', notes.length + ncards.length, h('span', { class: 'kavatar', svg: I.book })) : h('section', { class: 'kcol knotes', style: `--pc:#ED7F32;flex-basis:${kW('notes')}px` }, ntl.rz,
+    h('header', { class: 'kcol-head' }, h('span', { class: 'kavatar', svg: I.book }), h('span', { class: 'kname', style: 'cursor:default' }, 'Mis notas'), h('span', { class: 'kcount' }, notes.length + ncards.length), ntl.col),
+    h('div', { class: 'kcards', 'data-col': 'notes' }, mixItems(ncards, notes).map(it => it.kind === 'note' ? noteCard(it.x, '#ED7F32') : card(it.x, NCOL))),
     ro ? null : h('button', { class: 'kadd', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota'));
   const search = h('input', { class: 'input', type: 'search', id: 'kq', placeholder: 'Buscar en notas y pendientes…', value: S.kq || '', 'aria-label': 'Buscar pendientes',
     oninput: e => { S.kq = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#kq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
@@ -643,10 +650,11 @@ function renderKanban(m) {
       h('label', { class: 'check', style: 'margin:0' }, h('input', { type: 'checkbox', checked: !!S.khide, onchange: e => { S.khide = e.target.checked; render(); } }), 'Ocultar ejecutadas')),
     h('div', { class: 'kanban' }, notesCol, cols.map(colEl), ro ? null : h('button', { class: 'kcol kaddcol', onclick: addPerson }, h('span', { svg: I.plus }), 'Agregar persona')));
   if (ro || !window.Sortable) return;
-  m.querySelectorAll('.kcol:not(.knotes) .kcards').forEach(el => Sortable.create(el, { group: 'kcards', animation: 150, ghostClass: 'kghost', forceFallback: true, fallbackOnBody: true, emptyInsertThreshold: 40, filter: 'input,button,textarea,select,.cm', preventOnFilter: false, onEnd: async e => {
-    const ups = [];
-    for (const list of new Set([e.from, e.to])) [...list.querySelectorAll('.kcard')].forEach((n, i) => { const k = S.kcards.find(x => x.id === n.dataset.id); const pos = (i + 1) * 1000, cid = list.dataset.col;
-      if (k && (k.position !== pos || k.col_id !== cid)) { k.position = pos; k.col_id = cid; ups.push(q(sb.from('kcards').update({ position: pos, col_id: cid }).eq('id', k.id))); } });
+  m.querySelectorAll('.kcol .kcards').forEach(el => Sortable.create(el, { group: 'kcards', animation: 150, ghostClass: 'kghost', forceFallback: true, fallbackOnBody: true, emptyInsertThreshold: 40, filter: 'input,button,textarea,select,.cm', preventOnFilter: false, onStart: () => { S.dragT = Date.now(); }, onEnd: async e => {
+    S.dragT = Date.now(); const ups = [];
+    for (const list of new Set([e.from, e.to])) [...list.querySelectorAll(':scope > .kcard')].forEach((n, i) => { const pos = (i + 1) * 1000, cid = list.dataset.col;
+      if (n.dataset.kind === 'note') { const x = S.notes.find(y => y.id === n.dataset.id), c2 = cid === 'notes' ? null : cid; if (x && (x.position !== pos || (x.col_id || null) !== c2)) { x.position = pos; x.col_id = c2; ups.push(q(sb.from('notes').update({ position: pos, col_id: c2 }).eq('id', x.id))); } }
+      else { const k = S.kcards.find(x => x.id === n.dataset.id); if (k && (k.position !== pos || k.col_id !== cid)) { k.position = pos; k.col_id = cid; ups.push(q(sb.from('kcards').update({ position: pos, col_id: cid }).eq('id', k.id))); } } });
     render(); await Promise.all(ups);
   } }));
   const kb = m.querySelector('.kanban');
