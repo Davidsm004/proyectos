@@ -30,6 +30,7 @@ const I = {
   down: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v10M4 9l4 4 4-4"/></svg>',
   list: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4h12M2 8h12M2 12h12"/></svg>',
   book: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 2.5h7.5A2.5 2.5 0 0113 5v8.5H5.5A2.5 2.5 0 013 11z"/><path d="M3 11a2 2 0 012-2h8"/></svg>',
+  bell: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 11V7a4 4 0 018 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.6 1.6 0 003 0"/></svg>',
   lock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/></svg>',
   edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 2l3 3-8 8H3v-3z"/></svg>'
 };
@@ -165,8 +166,14 @@ function renderLogin() {
   setTimeout(() => { if (!typed) { user.value = ''; pass.value = ''; } }, 400);
   const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'Ingresar');
   const form = h('form', { autocomplete: 'off', onsubmit: async e => {
-    e.preventDefault(); btn.disabled = true; btn.textContent = 'Verificando…';
+    e.preventDefault();
+    const F = (() => { try { return JSON.parse(localStorage.getItem('lpp-fail')) || { n: 0, until: 0 }; } catch (x) { return { n: 0, until: 0 }; } })();
+    if (F.until > Date.now()) return toast(`Demasiados intentos. Espera ${Math.ceil((F.until - Date.now()) / 60000)} min.`, 'err');
+    btn.disabled = true; btn.textContent = 'Verificando…';
     const { data, error } = await sb.auth.signInWithPassword({ email: user.value, password: pass.value });
+    const saveF = v => { try { localStorage.setItem('lpp-fail', JSON.stringify(v)); } catch (x) {} };
+    if (error && error.message === 'Invalid login credentials') { F.n++; if (F.n >= 5) F.until = Date.now() + Math.min(60, 2 ** (F.n - 5)) * 60000; saveF(F); pass.value = ''; }
+    if (!error) saveF({ n: 0, until: 0 });
     if (error) { toast(error.message === 'Invalid login credentials' ? 'Usuario o contraseña incorrectos' : error.message, 'err'); btn.disabled = false; btn.textContent = 'Ingresar'; return; }
     await enter(data.user);
   } }, h('div', { class: 'field' }, h('label', { for: 'email' }, 'Usuario'), user), h('div', { class: 'field' }, h('label', { for: 'password' }, 'Contraseña'), pass), btn);
@@ -207,7 +214,7 @@ function renderShell() {
         h('button', { id: 'nav-new', class: S.view === 'new' ? 'on' : '', onclick: () => go('new') }, h('span', { svg: I.plus }), 'Ingresar proyectos'),
         h('button', { id: 'nav-board', class: S.view === 'board' ? 'on' : '', onclick: () => go('board') }, h('span', { svg: I.list }), 'Ver proyectos'),
         h('button', { id: 'nav-diary', class: S.view === 'diary' ? 'on' : '', onclick: () => go('diary') }, h('span', { svg: I.book }), 'Mis notas')),
-      h('div', { class: 'right' }, h('span', { class: 'role-chip' }, p.role),
+      h('div', { class: 'right' }, h('button', { class: 'icon-btn bell', id: 'bell', 'aria-label': 'Notificaciones', title: 'Notificaciones', onclick: e => notifPanel(e.currentTarget) }, h('span', { svg: I.bell }), h('b', { id: 'bell-n', class: 'hidden' })), h('span', { class: 'role-chip' }, p.role),
         h('button', { class: 'icon-btn', style: 'width:auto;height:auto', title: p.email, 'aria-label': 'Cuenta', onclick: e => menu(e.currentTarget, [
           { label: p.email, run: () => {} }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
           h('span', { class: 'avatar', style: `background:${hashColor(p.email)}` }, initials(p.email))))),
@@ -216,6 +223,7 @@ function renderShell() {
 }
 function go(v) { S.view = v; renderShell(); scrollTo(0, 0); }
 function render() {
+  updateBell();
   const m = $('#main'); if (!m) return;
   if (S.view === 'new') return renderNew(m);
   if (S.view === 'diary') return renderDiary(m);
@@ -311,6 +319,44 @@ document.addEventListener('keydown', e => {
   else if (e.key.length === 1 && el._start) { e.preventDefault(); el._start(e.key); }
 });
 document.addEventListener('mousedown', e => { if (!e.target.closest('.board,.pop,.overlay,.drawer,.toolbar')) selectCell(null); });
+
+/* ---------- notificaciones: fechas que vencen en 2 días o menos ---------- */
+const dismissKey = () => 'notif:' + S.user.id;
+function dueItems() {
+  if (!S.user) return [];
+  const today = new Date(new Date().toDateString()), lim = new Date(today.getTime() + 2 * 864e5), out = [];
+  const dis = new Set(S.settings[dismissKey()] || []);
+  const push = (key, v, title, sub, open) => { const d = new Date(v + 'T00:00'); if (isNaN(d) || d > lim || dis.has(key)) return; out.push({ key, d, title, sub, open, late: d < today }); };
+  for (const p of S.projects) {
+    if (DONE.includes(norm(p.data.status))) continue;
+    for (const c of S.columns.filter(c => c.type === 'date' && c.key !== 'start' && c.scope === (p.parent_id ? 'sub' : 'project'))) {
+      const v = p.data[c.key]; if (!v) continue;
+      const par = p.parent_id ? findP(p.parent_id) : null;
+      push(`p:${p.id}:${c.key}:${v}`, v, p.data.name || 'Sin nombre', (par ? 'Subtarea de ' + par.data.name + ' · ' : 'Proyecto · ') + c.label, () => { S.view = 'board'; if (par) S.open.add(par.id); renderShell(); openDrawer(p.id, 'details'); });
+    }
+  }
+  for (const k of S.kcards) { if (k.author !== S.user.id || k.done || !k.due) continue; const col = S.kcols.find(c => c.id === k.col_id);
+    const pp = k.project_id && findP(k.project_id); push(`k:${k.id}:${k.due}`, k.due, k.title, (col ? 'Pendiente con ' + col.name : 'Nota') + (pp ? ' · ' + pp.data.name : ''), () => { if (col || !pp) { S.view = 'diary'; renderShell(); } else { S.view = 'board'; renderShell(); openDrawer(pp.id, 'pnotes'); } }); }
+  return out.sort((a, b) => a.d - b.d);
+}
+function updateBell() { const n = $('#bell-n'); if (!n) return; const c = dueItems().length; n.textContent = c > 99 ? '99+' : c; n.classList.toggle('hidden', !c); }
+async function dismiss(keys) {
+  const cur = new Set(S.settings[dismissKey()] || []); keys.forEach(k => cur.add(k));
+  S.settings[dismissKey()] = [...cur].slice(-2000); updateBell();
+  await q(sb.from('settings').upsert({ key: dismissKey(), value: S.settings[dismissKey()] }));
+}
+function notifPanel(anchor) {
+  const draw = () => {
+    const items = dueItems(), fmt = d => d.toLocaleDateString('es-CR', { weekday: 'short', day: 'numeric', month: 'short' });
+    const days = d => { const n = Math.round((d - new Date(new Date().toDateString())) / 864e5); return n < 0 ? `Vencida hace ${-n} día${n === -1 ? '' : 's'}` : n === 0 ? 'Vence hoy' : n === 1 ? 'Vence mañana' : 'Vence en 2 días'; };
+    box.replaceChildren(h('div', { class: 'notif-head' }, h('b', {}, 'Notificaciones'), items.length ? h('button', { class: 'link', onclick: async () => { await dismiss(items.map(i => i.key)); draw(); } }, 'Eliminar todas') : null),
+      h('div', {}, items.length ? items.map(it => h('div', { class: 'notif' + (it.late ? ' late' : '') },
+        h('button', { class: 'notif-main', onclick: () => { closePop(); it.open(); } }, h('b', {}, it.title), h('span', {}, it.sub), h('em', {}, days(it.d) + ' · ' + fmt(it.d))),
+        h('button', { class: 'icon-btn', svg: I.x, title: 'Eliminar notificación', 'aria-label': 'Eliminar notificación', onclick: async () => { await dismiss([it.key]); draw(); } })))
+        : h('p', { class: 'muted', style: 'padding:8px 4px' }, 'No hay fechas por vencer en los próximos 2 días.')));
+  };
+  const box = h('div', { class: 'notif-box' }); pop(anchor, box); popEl.classList.add('wide'); draw();
+}
 
 /* ---------- bloqueo por inactividad (10 min) ---------- */
 let lockTimer;
@@ -410,6 +456,21 @@ function openNote(id) {
   document.body.append(dr); drawSum(); setTimeout(() => grow(body), 0);
 }
 /* ---------- Pendientes por persona (tablero de cajitas) ---------- */
+const kui = () => S.settings['kui:' + S.user.id] || { w: {}, c: {} };
+async function setKui(fn) { const u = JSON.parse(JSON.stringify(kui())); u.w = u.w || {}; u.c = u.c || {}; fn(u); S.settings['kui:' + S.user.id] = u; render(); await q(sb.from('settings').upsert({ key: 'kui:' + S.user.id, value: u })); }
+const kW = id => kui().w?.[id] || 300, kC = id => !!kui().c?.[id];
+function kColTools(id, name) {
+  const rz = h('span', { class: 'kcol-rz', title: 'Arrastra para estirar o encoger · doble clic: ancho normal', ondblclick: () => setKui(u => { delete u.w[id]; }), onpointerdown: e => {
+    const sec = e.currentTarget.closest('.kcol'), x0 = e.clientX, w0 = sec.offsetWidth; let w = w0;
+    dragPointer(e, ev => { w = Math.max(200, Math.min(700, Math.round(w0 + ev.clientX - x0))); sec.style.flexBasis = w + 'px'; }, () => { if (w !== w0) setKui(u => { u.w[id] = w; }); });
+  } });
+  const col = h('button', { class: 'icon-btn kmin', title: 'Contraer columna', 'aria-label': 'Contraer ' + name, onclick: () => setKui(u => { u.c[id] = true; }) }, '–');
+  return { rz, col };
+}
+function kCollapsed(id, name, color, count, avatar) {
+  return h('section', { class: 'kcol collapsed', style: `--pc:${color}`, title: 'Expandir ' + name, role: 'button', tabIndex: 0, onclick: () => setKui(u => { delete u.c[id]; }), onkeydown: e => { if (e.key === 'Enter') setKui(u => { delete u.c[id]; }); } },
+    avatar, h('span', { class: 'kcount' }, count), h('span', { class: 'kvname' }, name));
+}
 const myCols = () => S.kcols.filter(c => c.author === S.user.id).sort(byPos);
 const cardsOf = cid => S.kcards.filter(k => k.col_id === cid).sort(byPos);
 const nextPos = arr => (arr.length ? Math.max(...arr.map(x => x.position || 0)) : 0) + 1000;
@@ -444,18 +505,22 @@ function renderKanban(m) {
           { label: k.is_task ? 'Convertir en nota' : 'Convertir en tarea', run: () => setCard(k, { is_task: !k.is_task, done: false }) },
           k.is_task && { label: k.done ? 'Marcar pendiente' : 'Marcar ejecutada', run: () => setCard(k, { done: !k.done }) },
           '-', { label: 'Eliminar', danger: true, run: async () => { if (!await confirmBox('Eliminar', `¿Eliminar "${k.title}"?`)) return; S.kcards = S.kcards.filter(x => x.id !== k.id); render(); await q(sb.from('kcards').delete().eq('id', k.id)); } }]) })),
-      k.body ? h('p', { class: 'kbody', onclick: () => !ro && cardForm(col, k) }, k.body) : null,
+      k.body ? h('p', { class: 'kbody' + (S.kexp?.has(k.id) ? ' open' : ''), onclick: () => !ro && cardForm(col, k) }, k.body) : null,
+      k.body && k.body.length > 120 ? h('button', { class: 'kmore', onclick: e => { e.stopPropagation(); S.kexp = S.kexp || new Set(); S.kexp.has(k.id) ? S.kexp.delete(k.id) : S.kexp.add(k.id); render(); } }, S.kexp?.has(k.id) ? 'Ver menos ▴' : 'Ver más ▾') : null,
       h('div', { class: 'kfoot' }, h('span', { class: 'ktag' }, k.is_task ? 'Tarea' : 'Nota'),
+        k.project_id && findP(k.project_id) ? h('button', { class: 'ktag kproj', title: 'Abrir proyecto', onclick: e => { e.stopPropagation(); const pp = findP(k.project_id); S.view = 'board'; if (pp.parent_id) S.open.add(pp.parent_id); renderShell(); openDrawer(pp.id, 'pnotes'); } }, '📁 ' + findP(k.project_id).data.name) : null,
         k.is_task ? h('span', { class: 'kstate ' + (k.done ? 'ok' : 'pend') }, k.done ? '✓ Ejecutada' : 'Pendiente') : null,
         due ? h('span', { class: 'kdue' + (late ? ' late' : '') }, due.toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })) : null));
   };
   const colEl = col => {
     const cards = cardsOf(col.id), shown = cards.filter(match), pend = cards.filter(k => k.is_task && !k.done).length;
-    return h('section', { class: 'kcol', 'data-id': col.id, style: `--pc:${col.color}` },
+    if (kC(col.id)) return kCollapsed(col.id, col.name, col.color, `${pend}/${cards.length}`, h('span', { class: 'kavatar' }, initials(col.name)));
+    const tl = kColTools(col.id, col.name);
+    return h('section', { class: 'kcol', 'data-id': col.id, style: `--pc:${col.color};flex-basis:${kW(col.id)}px` }, tl.rz,
       h('header', { class: 'kcol-head' }, ro ? null : h('span', { class: 'kgrip drag', svg: I.grip, title: 'Arrastrar persona' }),
         h('span', { class: 'kavatar' }, initials(col.name)),
         h('button', { class: 'kname', title: ro ? '' : 'Cambiar nombre', onclick: async () => { if (ro) return; const r = await ask('Cambiar nombre', [{ name: 'n', label: 'Nombre', value: col.name, required: true }]); if (r) { col.name = r.n.trim(); render(); await q(sb.from('kcols').update({ name: col.name }).eq('id', col.id)); } } }, col.name),
-        h('span', { class: 'kcount', title: 'Tareas pendientes / total' }, `${pend} / ${cards.length}`),
+        h('span', { class: 'kcount', title: 'Tareas pendientes / total' }, `${pend} / ${cards.length}`), tl.col,
         ro ? null : h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones de ' + col.name, onclick: e => menu(e.currentTarget, [
           { label: 'Cambiar nombre', run: async () => { const r = await ask('Cambiar nombre', [{ name: 'n', label: 'Nombre', value: col.name, required: true }]); if (r) { col.name = r.n.trim(); render(); await q(sb.from('kcols').update({ name: col.name }).eq('id', col.id)); } } },
           { label: 'Cambiar color', run: () => colorPicker(document.querySelector(`.kcol[data-id="${col.id}"] .kavatar`), col.color, async c => { col.color = c || '#0080E8'; render(); await q(sb.from('kcols').update({ color: col.color }).eq('id', col.id)); }) },
@@ -467,11 +532,12 @@ function renderKanban(m) {
       ro ? null : h('button', { class: 'kadd', onclick: () => cardForm(col) }, h('span', { svg: I.plus }), 'Agregar'));
   };
   const notes = S.notes.filter(n => n.author === S.user.id && (!qq || norm(n.title).includes(qq) || norm(n.body).includes(qq))).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
-  const notesCol = h('section', { class: 'kcol knotes', style: '--pc:#ED7F32' },
-    h('header', { class: 'kcol-head' }, h('span', { class: 'kavatar', svg: I.book }), h('span', { class: 'kname', style: 'cursor:default' }, 'Mis notas'), h('span', { class: 'kcount' }, notes.length)),
+  const ntl = kColTools('notes', 'Mis notas');
+  const notesCol = kC('notes') ? kCollapsed('notes', 'Mis notas', '#ED7F32', notes.length, h('span', { class: 'kavatar', svg: I.book })) : h('section', { class: 'kcol knotes', style: `--pc:#ED7F32;flex-basis:${kW('notes')}px` }, ntl.rz,
+    h('header', { class: 'kcol-head' }, h('span', { class: 'kavatar', svg: I.book }), h('span', { class: 'kname', style: 'cursor:default' }, 'Mis notas'), h('span', { class: 'kcount' }, notes.length), ntl.col),
     h('div', { class: 'kcards' }, notes.map(n => { const na = S.attachments.filter(x => x.project_id === n.id).length, b = String(n.body || '');
       return h('div', { class: 'kcard knote', style: 'cursor:pointer', role: 'button', tabIndex: 0, onclick: () => openNote(n.id), onkeydown: e => { if (e.key === 'Enter') openNote(n.id); } },
-        h('b', { class: 'ktitle' }, n.title || 'Sin título'), b ? h('p', { class: 'kbody' }, b) : null,
+        h('b', { class: 'ktitle' }, n.title || 'Sin título'), b ? h('p', { class: 'kbody' + (S.kexp?.has(n.id) ? ' open' : '') }, b) : null, b.length > 120 ? h('button', { class: 'kmore', onclick: e => { e.stopPropagation(); S.kexp = S.kexp || new Set(); S.kexp.has(n.id) ? S.kexp.delete(n.id) : S.kexp.add(n.id); render(); } }, S.kexp?.has(n.id) ? 'Ver menos ▴' : 'Ver más ▾') : null,
         h('div', { class: 'kfoot' }, h('span', { class: 'ktag' }, 'Nota'), na ? h('span', { class: 'ktag' }, '📎 ' + na) : null, h('span', { class: 'kdue' }, new Date(n.updated_at).toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })))); })),
     ro ? null : h('button', { class: 'kadd', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota'));
   const search = h('input', { class: 'input', type: 'search', id: 'kq', placeholder: 'Buscar en notas y pendientes…', value: S.kq || '', 'aria-label': 'Buscar pendientes',
@@ -815,7 +881,7 @@ async function removeProject(p) {
 }
 function rowMenu(anchor, p) {
   menu(anchor, [
-    { label: 'Editar detalles', run: () => openDrawer(p.id, 'details') }, { label: 'Abrir comentarios', run: () => openDrawer(p.id, 'comments') }, { label: 'Archivos adjuntos', run: () => openDrawer(p.id, 'files') }, { label: 'Historial de cambios', run: () => openDrawer(p.id, 'history') },
+    { label: 'Editar detalles', run: () => openDrawer(p.id, 'details') }, { label: 'Notas del proyecto', run: () => openDrawer(p.id, 'pnotes') }, { label: 'Abrir comentarios', run: () => openDrawer(p.id, 'comments') }, { label: 'Archivos adjuntos', run: () => openDrawer(p.id, 'files') }, { label: 'Historial de cambios', run: () => openDrawer(p.id, 'history') },
     canEdit() && '-',
     canEdit() && !p.parent_id && { label: 'Agregar subtarea', run: async () => { const r = await ask('Nueva subtarea', [{ name: 'name', label: 'Nombre', required: true }]); if (r) await createProject({ group_id: p.group_id, parent_id: p.id, data: { name: r.name.trim() } }); } },
     canEdit() && { label: 'Duplicar', run: () => duplicate(p) },
@@ -922,14 +988,14 @@ function openDrawer(id, tab = 'comments') {
   document.querySelector('.drawer')?.remove();
   const p = findP(id); if (!p) return;
   const body = h('div', { class: 'drawer-body' });
-  const tabs = [['details', 'Detalles'], ['comments', 'Comentarios'], ['files', 'Archivos'], ['history', 'Historial']];
+  const tabs = [['details', 'Detalles'], ['pnotes', 'Notas'], ['comments', 'Comentarios'], ['files', 'Archivos'], ['history', 'Historial']];
   const parent = p.parent_id ? findP(p.parent_id) : null;
   const dr = h('aside', { class: 'drawer', role: 'dialog', 'aria-label': 'Detalle' },
     h('div', { class: 'drawer-head' }, h('div', { style: 'flex:1;min-width:0' }, parent ? h('div', { class: 'muted' }, 'Subtarea de ' + (parent.data.name || '')) : h('div', { class: 'muted' }, p.data.code || ''), h('h3', {}, p.data.name || 'Sin nombre')),
       h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: () => dr.remove() })),
     h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, l]) => h('button', { class: k === tab ? 'on' : '', role: 'tab', onclick: () => openDrawer(id, k) }, l))), body);
   document.body.append(dr);
-  if (tab === 'details') drawDetails(p, body); else if (tab === 'comments') drawComments(p, body); else if (tab === 'files') drawFiles(p, body); else drawHistory(p, body);
+  if (tab === 'pnotes') drawPNotes(p, body); else if (tab === 'details') drawDetails(p, body); else if (tab === 'comments') drawComments(p, body); else if (tab === 'files') drawFiles(p, body); else drawHistory(p, body);
 }
 function drawDetails(p, body) {
   const scope = p.parent_id ? 'sub' : 'project', ro = !canEdit();
@@ -950,6 +1016,42 @@ function drawDetails(p, body) {
     cols(scope).map(fieldFor),
     h('div', { class: 'field' }, h('label', {}, 'Color de la línea'), h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, [null, ...PALETTE].map(c => h('button', { class: 'cdot big', disabled: ro, style: `background:${c || '#fff'}${p.color === c ? ';box-shadow:0 0 0 2px var(--g900)' : ''}`, 'aria-label': c || 'Sin color',
       onclick: async () => { p.color = c; render(); openDrawer(p.id, 'details'); await q(sb.from('projects').update({ color: c }).eq('id', p.id)); } }))))));
+}
+async function personCol(name) { // busca o crea la columna de la persona en Mis notas
+  name = name.trim(); if (!name) return null;
+  let col = myCols().find(c => norm(c.name) === norm(name)); if (col) return col;
+  [col] = await q(sb.from('kcols').insert({ name, color: PALETTE[myCols().length % PALETTE.length], position: nextPos(myCols()), author: S.user.id }).select());
+  S.kcols.push(col); return col;
+}
+function drawPNotes(p, body) {
+  const ro = !canEdit(), list = S.kcards.filter(k => k.project_id === p.id).sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)));
+  const names = [...new Set([...myCols().map(c => c.name), ...allPersons()])].sort((x, y) => x.localeCompare(y, 'es'));
+  const txt = h('textarea', { class: 'input', placeholder: 'Escribe la nota o tarea…', 'aria-label': 'Nota', style: 'min-height:80px' });
+  const who = h('input', { class: 'input', list: 'pn-persons', placeholder: 'Responsable (opcional)', 'aria-label': 'Responsable' }); who.setAttribute('list', 'pn-persons');
+  const due = h('input', { class: 'input', type: 'date', 'aria-label': 'Fecha (opcional)', title: 'Fecha (opcional)' });
+  const add = async e => {
+    const t = txt.value.trim(); if (!t) return toast('Escribe la nota', 'err'); e.target.disabled = true;
+    const col = await personCol(who.value);
+    const lines = t.split('\n'), title = lines[0].slice(0, 140), rest = (lines[0].length > 140 ? lines[0].slice(140) + '\n' : '') + lines.slice(1).join('\n');
+    const [row] = await q(sb.from('kcards').insert({ title, body: rest.trim(), is_task: true, done: false, due: due.value || null, col_id: col ? col.id : null, project_id: p.id, position: col ? nextPos(cardsOf(col.id)) : 0, author: S.user.id }).select());
+    S.kcards.push(row); render(); openDrawer(p.id, 'pnotes'); toast(col ? `Nota creada y enviada a Mis notas · ${col.name}` : 'Nota agregada', 'ok');
+  };
+  body.replaceChildren(h('div', {},
+    ro ? null : h('div', { class: 'pn-form' }, txt, h('div', { class: 'pn-row' }, who, due), h('datalist', { id: 'pn-persons' }, names.map(n => h('option', { value: n }))),
+      h('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px' }, h('small', { class: 'muted' }, 'Si pones responsable, la nota aparece en Mis notas en su columna.'), h('button', { class: 'btn primary', onclick: add }, 'Agregar nota'))),
+    list.length ? list.map(k => { const col = S.kcols.find(c => c.id === k.col_id);
+      return h('div', { class: 'pn' + (k.done ? ' done' : ''), style: col ? `--pc:${col.color}` : '' },
+        h('input', { type: 'checkbox', class: 'kchk', checked: !!k.done, disabled: ro, title: 'Ejecutada', 'aria-label': 'Ejecutada', onchange: async e => { await setCard(k, { done: e.target.checked }); openDrawer(p.id, 'pnotes'); } }),
+        h('div', { class: 'pn-main' }, h('b', {}, k.title), k.body ? h('p', {}, k.body) : null,
+          h('div', { class: 'kfoot' },
+            ro ? (col ? h('span', { class: 'tag', style: `--tc:${col.color}` }, h('i', {}, initials(col.name)), col.name) : null)
+               : h('select', { class: 'pn-sel', 'aria-label': 'Responsable', onchange: async e => { const c2 = e.target.value === '__new' ? await personCol((await ask('Nuevo responsable', [{ name: 'n', label: 'Nombre', required: true }]))?.n || '') : (S.kcols.find(c => c.id === e.target.value) || null);
+                   if (e.target.value === '__new' && !c2) return openDrawer(p.id, 'pnotes'); await setCard(k, { col_id: c2 ? c2.id : null, position: c2 ? nextPos(cardsOf(c2.id)) : 0 }); openDrawer(p.id, 'pnotes'); } },
+                   h('option', { value: '' }, 'Sin responsable'), myCols().map(c => h('option', { value: c.id, selected: c.id === k.col_id }, c.name)), h('option', { value: '__new' }, '+ Nuevo responsable…')),
+            ro ? (k.due ? h('span', { class: 'kdue' }, k.due) : null) : h('input', { type: 'date', class: 'pn-date', value: k.due || '', 'aria-label': 'Fecha', onchange: async e => { await setCard(k, { due: e.target.value || null }); openDrawer(p.id, 'pnotes'); } }),
+            k.done ? h('span', { class: 'kstate ok' }, '✓ Ejecutada') : null)),
+        ro ? null : h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Eliminar nota', onclick: async () => { if (!await confirmBox('Eliminar nota', '¿Eliminar esta nota? También se quita de Mis notas.')) return; S.kcards = S.kcards.filter(x => x.id !== k.id); render(); openDrawer(p.id, 'pnotes'); await q(sb.from('kcards').delete().eq('id', k.id)); } }));
+    }) : h('p', { class: 'muted' }, 'Este proyecto aún no tiene notas.')));
 }
 function drawComments(p, body) {
   const ta = h('textarea', { class: 'input', placeholder: 'Escribe una actualización…', 'aria-label': 'Comentario' });
@@ -1264,5 +1366,6 @@ async function tokenModal(first) {
   if (!r) return; try { await sb.users.setToken(r.t.trim()); S.profile = sb.auth.profile(); toast('Guardado activado', 'ok'); } catch (e) { toast(e.message, 'err'); }
 }
 
+if (window.top !== window.self) { document.documentElement.innerHTML = ''; try { window.top.location = window.self.location.href; } catch (e) {} throw new Error('framed'); }
 window.addEventListener('DOMContentLoaded', () => boot().catch(e => { console.error(e); toast(e.message || 'Error al iniciar', 'err'); }));
 })();
