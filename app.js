@@ -221,7 +221,7 @@ function renderShell() {
     h('main', { id: 'main' })));
   render();
 }
-function go(v) { S.view = v; renderShell(); scrollTo(0, 0); }
+function go(v) { S.view = v; renderShell(); scrollTo(0, 0); hbar.update(); }
 function render() {
   updateBell();
   const m = $('#main'); if (!m) return;
@@ -230,7 +230,7 @@ function render() {
   const keep = {}; m.querySelectorAll('[data-scroll]').forEach(el => keep[el.dataset.scroll] = el.scrollLeft);
   renderBoard(m);
   m.querySelectorAll('[data-scroll]').forEach(el => { if (keep[el.dataset.scroll]) el.scrollLeft = keep[el.dataset.scroll]; });
-  restoreSel();
+  restoreSel(); requestAnimationFrame(hbar.update);
 }
 
 /* ---------- selección, Ctrl+C / Ctrl+V / Ctrl+X / Ctrl+Z / Ctrl+Y como Excel ---------- */
@@ -319,6 +319,24 @@ document.addEventListener('keydown', e => {
   else if (e.key.length === 1 && el._start) { e.preventDefault(); el._start(e.key); }
 });
 document.addEventListener('mousedown', e => { if (!e.target.closest('.board,.pop,.overlay,.drawer,.toolbar')) selectCell(null); });
+
+/* ---------- barra horizontal fija abajo ---------- */
+const hbar = (() => { const el = h('div', { id: 'hbar', 'aria-hidden': 'true' }, h('div')); let cur = null, lock = false; el.style.display = 'none';
+  el.addEventListener('scroll', () => { if (cur && !lock) { lock = true; cur.scrollLeft = el.scrollLeft; requestAnimationFrame(() => lock = false); } });
+  const update = () => {
+    if (!document.body.contains(el)) document.body.append(el);
+    const vh = innerHeight - (innerWidth <= 760 ? 64 : 0);
+    const w = [...document.querySelectorAll('.tbl-wrap')].find(x => { const r = x.getBoundingClientRect(); return r.top < vh - 40 && r.bottom > vh && x.scrollWidth > x.clientWidth + 2; });
+    if (cur && cur !== w) cur.removeEventListener('scroll', cur._hb);
+    cur = w || null;
+    if (!cur || S.view !== 'board') { el.style.display = 'none'; return; }
+    const r = cur.getBoundingClientRect(); el.style.display = 'block'; el.style.left = r.left + 'px'; el.style.width = r.width + 'px'; el.firstChild.style.width = cur.scrollWidth + 'px';
+    if (!cur._hb) cur._hb = () => { if (!lock) { lock = true; el.scrollLeft = cur.scrollLeft; requestAnimationFrame(() => lock = false); } };
+    cur.addEventListener('scroll', cur._hb); el.scrollLeft = cur.scrollLeft;
+  };
+  addEventListener('scroll', update, { passive: true }); addEventListener('resize', update);
+  return { update };
+})();
 
 /* ---------- notificaciones: fechas que vencen en 2 días o menos ---------- */
 const dismissKey = () => 'notif:' + S.user.id;
