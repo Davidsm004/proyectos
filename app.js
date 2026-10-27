@@ -30,6 +30,7 @@ const I = {
   down: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v10M4 9l4 4 4-4"/></svg>',
   list: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4h12M2 8h12M2 12h12"/></svg>',
   book: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 2.5h7.5A2.5 2.5 0 0113 5v8.5H5.5A2.5 2.5 0 013 11z"/><path d="M3 11a2 2 0 012-2h8"/></svg>',
+  cal: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M5 1.5v3M11 1.5v3M5 9.5h4M5 11.5h6"/></svg>',
   moon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13.5 9.5A5.5 5.5 0 016.5 2.5a5.5 5.5 0 107 7z"/></svg>',
   sun: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3"/></svg>',
   bell: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 11V7a4 4 0 018 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.6 1.6 0 003 0"/></svg>',
@@ -594,13 +595,14 @@ applyTheme();
 
 /* ---------- cronograma tipo Project (Gantt) ---------- */
 const DAY = 864e5, dOf = s => { const d = new Date(String(s).slice(0, 10) + 'T00:00:00'); return isNaN(d) ? null : d; }, iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+function openGantt(p) { S.gproj = p.id; S.gclosed?.delete(p.id); S.bview = 'gantt'; S.view = 'board'; renderShell(); scrollTo(0, 0); }
 function renderGantt() {
   const gs = S.groups.slice().sort(byPos).filter(g => S.kg === 'all' || g.id === S.kg || true);
   const PX = { day: 30, week: 12, month: 4 }[S.gz || 'week'], RH = 34, LW = innerWidth < 760 ? 260 : 600;
   S.gclosed = S.gclosed || new Set();
   const rows = [];
   gs.forEach((g, gi) => {
-    const tops = visibleTop(g.id); if (!tops.length) return;
+    const tops = S.gproj ? topOf(g.id).filter(p => p.id === S.gproj) : visibleTop(g.id); if (!tops.length) return;
     rows.push({ kind: 'group', g, wbs: String(gi + 1), name: g.name, color: g.color, items: tops.flatMap(p => [p, ...subsOf(p.id)]) });
     if (S.gclosed.has(g.id)) return;
     tops.forEach((p, pi) => {
@@ -664,7 +666,10 @@ function renderGantt() {
   body.append(h('div', { class: 'g-today', style: `left:${LW + x(today) + PX / 2}px`, title: 'Hoy' }));
   inner.append(body); grid.append(inner);
   const zoom = h('div', { class: 'seg', 'aria-label': 'Escala' }, [['day', 'Días'], ['week', 'Semanas'], ['month', 'Meses']].map(([k, l]) => h('button', { class: (S.gz || 'week') === k ? 'on' : '', onclick: () => { S.gz = k; render(); } }, l)));
-  const wrap = h('section', { class: 'gantt-card' }, h('div', { class: 'g-tools' }, zoom, h('button', { class: 'btn', onclick: () => { const el = grid; el.scrollLeft = Math.max(0, x(today) - 200); } }, 'Ir a hoy'),
+  const gp = S.gproj && findP(S.gproj);
+  const wrap = h('section', { class: 'gantt-card' }, h('div', { class: 'g-tools' }, gp ? h('b', { class: 'g-title' }, '📅 ' + (gp.data.name || 'Proyecto')) : null, gp ? h('button', { class: 'btn', onclick: () => { S.gproj = null; render(); } }, 'Ver todos los proyectos') : null,
+    gp && canEdit() ? h('button', { class: 'btn primary', onclick: async () => { const r = await ask('Nueva actividad del cronograma', [{ name: 'name', label: 'Actividad', required: true }, { name: 's', label: 'Inicio', type: 'date', value: iso(today) }, { name: 'e', label: 'Fin', type: 'date', value: iso(new Date(today.getTime() + 6 * DAY)) }], 'Agregar');
+      if (r) await createProject({ group_id: gp.group_id, parent_id: gp.id, data: { name: r.name.trim(), start: r.s || null, end: r.e || null } }); } }, '+ Actividad') : null, zoom, h('button', { class: 'btn', onclick: () => { const el = grid; el.scrollLeft = Math.max(0, x(today) - 200); } }, 'Ir a hoy'),
     h('span', { class: 'muted' }, rows.length ? 'Clic en el nombre para editar · ⊟ contrae' : 'No hay proyectos que mostrar.')), grid);
   setTimeout(() => { if (!grid._init) { grid._init = 1; grid.scrollLeft = Math.max(0, x(today) - 220); } }, 0);
   return wrap;
@@ -710,7 +715,7 @@ function renderBoard(m) {
     canEdit() ? h('button', { class: 'btn', id: 'btn-group', onclick: addGroup }, '+ Grupo') : null,
     canEdit() ? h('button', { class: 'btn', onclick: importExcelModal }, h('span', { svg: I.up }), 'Importar') : null,
     h('button', { class: 'btn', id: 'btn-export', onclick: exportExcel }, h('span', { svg: I.down }), 'Exportar'));
-  const vsel = h('div', { class: 'seg', role: 'tablist', 'aria-label': 'Vista' }, [['table', 'Tabla'], ['gantt', 'Cronograma']].map(([k, l]) => h('button', { class: (S.bview || 'table') === k ? 'on' : '', role: 'tab', id: 'v-' + k, onclick: () => { S.bview = k; render(); } }, l)));
+  const vsel = h('div', { class: 'seg', role: 'tablist', 'aria-label': 'Vista' }, [['table', 'Tabla'], ['gantt', 'Cronograma']].map(([k, l]) => h('button', { class: (S.bview || 'table') === k ? 'on' : '', role: 'tab', id: 'v-' + k, onclick: () => { S.bview = k; if (k === 'table') S.gproj = null; render(); } }, l)));
   if (S.bview === 'gantt') {
     m.replaceChildren(h('div', { class: 'page-head hero' }, h('div', {}, h('h1', {}, 'Cronograma'), h('p', {}, 'Arrastra una barra para mover fechas · arrastra su borde derecho para cambiar la duración')), vsel), kgSel, kpis, tb, renderGantt());
     return;
@@ -773,6 +778,7 @@ function projectRow(p, pc) {
     h('td', { class: 'c-name' }, h('div', { class: 'name-cell' },
       h('button', { class: 'icon-btn', 'aria-label': open ? 'Ocultar subtareas' : 'Ver subtareas', 'aria-expanded': String(open), onclick: () => { open ? S.open.delete(p.id) : S.open.add(p.id); render(); } }, h('span', { class: 'caret' + (open ? ' open' : ''), style: 'display:inline-grid', svg: I.caret })),
       colorDot(p), nameEditor(p), subs.length ? h('span', { class: 'subcount', title: 'Subtareas' }, subs.length) : null,
+      h('button', { class: 'icon-btn', 'aria-label': 'Cronograma del proyecto', title: 'Cronograma de este proyecto', onclick: () => openGantt(p) }, h('span', { svg: I.cal })),
       h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Comentarios', title: 'Comentarios e historial', onclick: () => openDrawer(p.id, 'comments') }, h('span', { svg: I.chat }), nC ? h('b', {}, nC) : null),
       h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Archivos', title: 'Archivos', onclick: () => openDrawer(p.id, 'files') }, h('span', { svg: I.clip }), nF ? h('b', {}, nF) : null),
       h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Acciones del proyecto', onclick: e => rowMenu(e.currentTarget, p) }))),
@@ -999,7 +1005,7 @@ async function removeProject(p) {
 }
 function rowMenu(anchor, p) {
   menu(anchor, [
-    { label: 'Editar detalles', run: () => openDrawer(p.id, 'details') }, { label: 'Notas del proyecto', run: () => openDrawer(p.id, 'pnotes') }, { label: 'Abrir comentarios', run: () => openDrawer(p.id, 'comments') }, { label: 'Archivos adjuntos', run: () => openDrawer(p.id, 'files') }, { label: 'Historial de cambios', run: () => openDrawer(p.id, 'history') },
+    { label: 'Editar detalles', run: () => openDrawer(p.id, 'details') }, { label: 'Notas del proyecto', run: () => openDrawer(p.id, 'pnotes') }, !p.parent_id && { label: 'Cronograma del proyecto', run: () => openGantt(p) }, { label: 'Abrir comentarios', run: () => openDrawer(p.id, 'comments') }, { label: 'Archivos adjuntos', run: () => openDrawer(p.id, 'files') }, { label: 'Historial de cambios', run: () => openDrawer(p.id, 'history') },
     canEdit() && '-',
     canEdit() && !p.parent_id && { label: 'Agregar subtarea', run: async () => { const r = await ask('Nueva subtarea', [{ name: 'name', label: 'Nombre', required: true }]); if (r) await createProject({ group_id: p.group_id, parent_id: p.id, data: { name: r.name.trim() } }); } },
     canEdit() && { label: 'Duplicar', run: () => duplicate(p) },

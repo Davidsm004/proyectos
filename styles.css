@@ -526,3 +526,5 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 [data-theme=dark] .add-cell:hover{background:rgba(0,128,232,.12)}
 [data-theme=dark] .sortable-chosen td{background:#1E2A44!important}
 [data-theme=dark] .drop{border-color:var(--g400)}
+
+.g-title{font-size:14px;margin-right:4px}
