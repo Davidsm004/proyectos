@@ -335,3 +335,10 @@ tr.tall .cell .txt{-webkit-line-clamp:unset;display:block}
 .kadd:hover{background:rgba(255,255,255,.7)}
 .kghost{opacity:.35}
 @media (max-width:760px){.kcol{flex-basis:82vw}}
+
+.knotes{background:#FBF1EA}
+.knotes .kavatar svg{width:14px;height:14px}
+.kaddcol{flex:0 0 220px;border:2px dashed var(--g400);border-top:2px dashed var(--g400);background:transparent;color:var(--g700);font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px;min-height:90px;cursor:pointer}
+.kaddcol:hover{border-color:var(--blue);color:var(--blue)}
+.note-drawer .drawer-head{align-items:center}
+.note-drawer .note-title{flex:1}

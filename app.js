@@ -353,51 +353,36 @@ let noteTimer;
 function saveNote(n) { n.updated_at = new Date().toISOString(); clearTimeout(noteTimer); noteTimer = setTimeout(() => q(sb.from('notes').update({ title: n.title, body: n.body, updated_at: n.updated_at }).eq('id', n.id)).catch(() => {}), 700); }
 async function newNote() {
   const [row] = await q(sb.from('notes').insert({ title: '', body: '', author: S.user.id, updated_at: new Date().toISOString() }).select());
-  S.notes.push(row); S.noteId = row.id; render(); setTimeout(() => $('#note-title')?.focus(), 50);
+  S.notes.push(row); render(); openNote(row.id); setTimeout(() => $('#note-title')?.focus(), 50);
 }
 async function delNote(n) {
   if (!await confirmBox('Eliminar nota', `¿Eliminar "${n.title || 'Sin título'}" y sus adjuntos?`)) return;
   const at = S.attachments.filter(a => a.project_id === n.id);
   if (at.length) { await sb.storage.from('attachments').remove(at.map(a => a.path)); await q(sb.from('attachments').delete().eq('project_id', n.id)); }
   await q(sb.from('notes').delete().eq('id', n.id));
-  S.notes = S.notes.filter(x => x.id !== n.id); S.attachments = S.attachments.filter(a => a.project_id !== n.id); S.noteId = null; render(); toast('Nota eliminada', 'ok');
+  S.notes = S.notes.filter(x => x.id !== n.id); S.attachments = S.attachments.filter(a => a.project_id !== n.id); document.querySelector('.drawer')?.remove(); render(); toast('Nota eliminada', 'ok');
 }
-function renderDiary(m) {
-  const tabs = h('div', { class: 'seg', role: 'tablist' }, [['notes', 'Notas'], ['board', 'Pendientes por persona']].map(([k, l]) => h('button', { class: (S.ntab || 'notes') === k ? 'on' : '', role: 'tab', onclick: () => { S.ntab = k; render(); } }, l)));
-  if (S.ntab === 'board') return renderKanban(m, tabs);
-  const mine = S.notes.filter(n => n.author === S.user.id).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
-  const qq = norm(S.dq || ''), list = qq ? mine.filter(n => norm(n.title).includes(qq) || norm(n.body).includes(qq)) : mine;
-  const cur = mine.find(n => n.id === S.noteId) || null;
-  const fdate = d => d ? new Date(d).toLocaleString('es-CR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-  const snip = n => { const b = String(n.body || ''); if (!qq) return b.slice(0, 110); const i = norm(b).indexOf(qq); return i < 0 ? b.slice(0, 110) : (i > 30 ? '…' : '') + b.slice(Math.max(0, i - 30), i + 80); };
-  const search = h('input', { class: 'input', type: 'search', id: 'dq', placeholder: 'Buscar en títulos y notas…', value: S.dq || '', 'aria-label': 'Buscar notas',
-    oninput: e => { S.dq = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#dq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
-  const listEl = h('div', { class: 'note-list' }, list.length ? list.map(n => h('button', { class: 'note-item' + (cur && n.id === cur.id ? ' on' : ''), onclick: () => { S.noteId = n.id; render(); } },
-    h('b', {}, n.title || 'Sin título'), h('span', { class: 'muted' }, fdate(n.updated_at), S.attachments.some(a => a.project_id === n.id) ? ' · 📎 ' + S.attachments.filter(a => a.project_id === n.id).length : ''),
-    h('small', {}, snip(n)))) : h('p', { class: 'muted', style: 'padding:12px' }, qq ? 'No hay notas que coincidan.' : 'Aún no tienes notas.'));
-  let editor;
-  if (!cur) editor = h('div', { class: 'card empty-state' }, h('p', {}, 'Selecciona una nota o crea una nueva.'), canEdit() ? h('button', { class: 'btn primary', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota') : null);
-  else {
-    const ro = !canEdit();
-    const sumBox = h('ul', { class: 'note-sum-list' });
-    const drawSum = () => { const s = summarize(cur.body); sumBox.replaceChildren(...(s.length ? s.map(x => h('li', {}, x)) : [h('li', { class: 'muted' }, 'Escribe la nota y aquí aparecerán los puntos más importantes.')])); };
-    const body = h('textarea', { class: 'input note-body', id: 'note-body', value: cur.body || '', placeholder: 'Escribe tu nota…', disabled: ro, 'aria-label': 'Cuerpo de la nota',
-      oninput: e => { cur.body = e.target.value; e.target.style.height = 'auto'; e.target.style.height = Math.max(260, e.target.scrollHeight + 4) + 'px'; drawSum(); saveNote(cur); } });
-    const files = h('div', {}); drawFiles(cur, files, () => render());
-    editor = h('section', { class: 'card note-editor' },
-      h('div', { style: 'display:flex;gap:8px;align-items:center' }, h('input', { class: 'input note-title', id: 'note-title', value: cur.title || '', placeholder: 'Título', disabled: ro, 'aria-label': 'Título',
-        oninput: e => { cur.title = e.target.value; saveNote(cur); } }),
-        canEdit() ? h('button', { class: 'btn danger', onclick: () => delNote(cur) }, 'Eliminar') : null),
-      h('p', { class: 'muted', style: 'margin:6px 0 10px' }, 'Creada ' + fdate(cur.created_at) + ' · actualizada ' + fdate(cur.updated_at) + ' · se guarda automáticamente'),
+function renderDiary(m) { return renderKanban(m); }
+const fdate = d => d ? new Date(d).toLocaleString('es-CR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+function openNote(id) {
+  document.querySelector('.drawer')?.remove();
+  const cur = S.notes.find(n => n.id === id); if (!cur) return;
+  const ro = !canEdit(), sumBox = h('ul', { class: 'note-sum-list' });
+  const drawSum = () => { const s = summarize(cur.body); sumBox.replaceChildren(...(s.length ? s.map(x => h('li', {}, x)) : [h('li', { class: 'muted' }, 'Escribe la nota y aquí aparecerán los puntos más importantes.')])); };
+  const grow = el => { el.style.height = 'auto'; el.style.height = Math.max(220, el.scrollHeight + 4) + 'px'; };
+  const body = h('textarea', { class: 'input note-body', id: 'note-body', value: cur.body || '', placeholder: 'Escribe tu nota…', disabled: ro, 'aria-label': 'Cuerpo de la nota',
+    oninput: e => { cur.body = e.target.value; grow(e.target); drawSum(); saveNote(cur); } });
+  const files = h('div', {}); drawFiles(cur, files, () => { render(); openNote(cur.id); });
+  const dr = h('aside', { class: 'drawer note-drawer', role: 'dialog', 'aria-label': 'Nota' },
+    h('div', { class: 'drawer-head' }, h('input', { class: 'input note-title', id: 'note-title', value: cur.title || '', placeholder: 'Título', disabled: ro, 'aria-label': 'Título', oninput: e => { cur.title = e.target.value; saveNote(cur); } }),
+      h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: () => { dr.remove(); render(); } })),
+    h('div', { class: 'drawer-body' },
+      h('p', { class: 'muted', style: 'margin:0 0 10px' }, 'Creada ' + fdate(cur.created_at) + ' · actualizada ' + fdate(cur.updated_at) + ' · se guarda sola'),
       body, h('h3', { class: 'note-h' }, 'Adjuntos'), files,
-      h('div', { class: 'note-sum' }, h('h3', { class: 'note-h' }, 'Resumen de lo más importante'), sumBox));
-    drawSum(); setTimeout(() => { body.style.height = Math.max(260, body.scrollHeight + 4) + 'px'; }, 0);
-  }
-  m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Mis notas'), h('p', { class: 'muted' }, 'Tus notas personales con adjuntos y resumen automático.')),
-    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, tabs, canEdit() ? h('button', { class: 'btn primary', id: 'btn-note', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota') : null)),
-    h('div', { class: 'diary' }, h('aside', { class: 'card note-side' }, h('div', { class: 'search', style: 'max-width:none;margin-bottom:10px' }, h('span', { svg: I.search }), search), listEl), editor));
+      h('div', { class: 'note-sum' }, h('h3', { class: 'note-h' }, 'Resumen de lo más importante'), sumBox),
+      ro ? null : h('div', { style: 'display:flex;justify-content:flex-end;margin-top:16px' }, h('button', { class: 'btn danger', onclick: () => delNote(cur) }, 'Eliminar nota'))));
+  document.body.append(dr); drawSum(); setTimeout(() => grow(body), 0);
 }
-
 /* ---------- Pendientes por persona (tablero de cajitas) ---------- */
 const myCols = () => S.kcols.filter(c => c.author === S.user.id).sort(byPos);
 const cardsOf = cid => S.kcards.filter(k => k.col_id === cid).sort(byPos);
@@ -419,7 +404,7 @@ async function cardForm(col, k) {
   else { const [row] = await q(sb.from('kcards').insert({ ...v, col_id: col.id, position: nextPos(cardsOf(col.id)), author: S.user.id }).select()); S.kcards.push(row); render(); }
 }
 async function setCard(k, v) { Object.assign(k, v); render(); await q(sb.from('kcards').update(v).eq('id', k.id)); }
-function renderKanban(m, tabs) {
+function renderKanban(m) {
   const ro = !canEdit(), qq = norm(S.kq || '');
   const match = k => !qq || norm(k.title).includes(qq) || norm(k.body).includes(qq);
   const card = (k, col) => {
@@ -455,16 +440,24 @@ function renderKanban(m, tabs) {
       h('div', { class: 'kcards', 'data-col': col.id }, shown.filter(k => !(S.khide && k.done)).map(k => card(k, col))),
       ro ? null : h('button', { class: 'kadd', onclick: () => cardForm(col) }, h('span', { svg: I.plus }), 'Agregar'));
   };
-  const search = h('input', { class: 'input', type: 'search', id: 'kq', placeholder: 'Buscar pendientes…', value: S.kq || '', 'aria-label': 'Buscar pendientes',
+  const notes = S.notes.filter(n => n.author === S.user.id && (!qq || norm(n.title).includes(qq) || norm(n.body).includes(qq))).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
+  const notesCol = h('section', { class: 'kcol knotes', style: '--pc:#ED7F32' },
+    h('header', { class: 'kcol-head' }, h('span', { class: 'kavatar', svg: I.book }), h('span', { class: 'kname', style: 'cursor:default' }, 'Mis notas'), h('span', { class: 'kcount' }, notes.length)),
+    h('div', { class: 'kcards' }, notes.map(n => { const na = S.attachments.filter(x => x.project_id === n.id).length, b = String(n.body || '');
+      return h('div', { class: 'kcard knote', style: 'cursor:pointer', role: 'button', tabIndex: 0, onclick: () => openNote(n.id), onkeydown: e => { if (e.key === 'Enter') openNote(n.id); } },
+        h('b', { class: 'ktitle' }, n.title || 'Sin título'), b ? h('p', { class: 'kbody' }, b) : null,
+        h('div', { class: 'kfoot' }, h('span', { class: 'ktag' }, 'Nota'), na ? h('span', { class: 'ktag' }, '📎 ' + na) : null, h('span', { class: 'kdue' }, new Date(n.updated_at).toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })))); })),
+    ro ? null : h('button', { class: 'kadd', onclick: newNote }, h('span', { svg: I.plus }), 'Nueva nota'));
+  const search = h('input', { class: 'input', type: 'search', id: 'kq', placeholder: 'Buscar en notas y pendientes…', value: S.kq || '', 'aria-label': 'Buscar pendientes',
     oninput: e => { S.kq = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#kq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
   const cols = myCols();
-  m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Mis notas'), h('p', { class: 'muted' }, 'Temas pendientes por persona · arrastra las cajitas entre personas')),
-    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, tabs, ro ? null : h('button', { class: 'btn primary', id: 'btn-person', onclick: addPerson }, h('span', { svg: I.plus }), 'Persona'))),
+  m.replaceChildren(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Mis notas'), h('p', { class: 'muted' }, 'Tus notas y los temas pendientes con cada persona · arrastra las cajitas entre personas')),
+    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, ro ? null : h('button', { class: 'btn', id: 'btn-note', onclick: newNote }, h('span', { svg: I.plus }), 'Nota'), ro ? null : h('button', { class: 'btn primary', id: 'btn-person', onclick: addPerson }, h('span', { svg: I.plus }), 'Persona'))),
     h('div', { class: 'toolbar' }, h('div', { class: 'search' }, h('span', { svg: I.search }), search),
       h('label', { class: 'check', style: 'margin:0' }, h('input', { type: 'checkbox', checked: !!S.khide, onchange: e => { S.khide = e.target.checked; render(); } }), 'Ocultar ejecutadas')),
-    cols.length ? h('div', { class: 'kanban' }, cols.map(colEl)) : h('div', { class: 'card empty-state' }, h('p', {}, 'Agrega a las personas con las que tienes temas pendientes.'), ro ? null : h('button', { class: 'btn primary', onclick: addPerson }, '+ Agregar persona')));
+    h('div', { class: 'kanban' }, notesCol, cols.map(colEl), ro ? null : h('button', { class: 'kcol kaddcol', onclick: addPerson }, h('span', { svg: I.plus }), 'Agregar persona')));
   if (ro || !window.Sortable) return;
-  m.querySelectorAll('.kcards').forEach(el => Sortable.create(el, { group: 'kcards', animation: 150, ghostClass: 'kghost', forceFallback: true, fallbackOnBody: true, emptyInsertThreshold: 40, filter: 'input,button', preventOnFilter: false, onEnd: async e => {
+  m.querySelectorAll('.kcol:not(.knotes) .kcards').forEach(el => Sortable.create(el, { group: 'kcards', animation: 150, ghostClass: 'kghost', forceFallback: true, fallbackOnBody: true, emptyInsertThreshold: 40, filter: 'input,button', preventOnFilter: false, onEnd: async e => {
     const ups = [];
     for (const list of new Set([e.from, e.to])) [...list.querySelectorAll('.kcard')].forEach((n, i) => { const k = S.kcards.find(x => x.id === n.dataset.id); const pos = (i + 1) * 1000, cid = list.dataset.col;
       if (k && (k.position !== pos || k.col_id !== cid)) { k.position = pos; k.col_id = cid; ups.push(q(sb.from('kcards').update({ position: pos, col_id: cid }).eq('id', k.id))); } });
