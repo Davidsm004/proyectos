@@ -605,3 +605,10 @@ tr.drop-on td{background:rgba(0,128,232,.1)!important}
 [data-theme=dark] .fu{background:#161B2A}[data-theme=dark] .fu.st-late{background:#2A1517}
 @media (max-width:760px){.fu-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.nav button{font-size:10px}}
 .overlay{z-index:170}
+
+.fu-quote{margin:10px 0 0;border-left:3px solid var(--orange);background:#FEF6F0;border-radius:8px;padding:8px 12px}
+.fu-quote small{color:var(--g700);font-weight:600}.fu-quote p{margin:4px 0 0;white-space:pre-wrap;word-break:break-word;font-size:13.5px}
+[data-theme=dark] .fu-quote{background:#2A1E16}
+.fu-src{font-weight:600}
+.cm-fu{font-size:11px;margin-left:auto}.cm-fu+.cm-del{margin-left:6px}
+.kcard.flash,tr.flash td{box-shadow:0 0 0 3px var(--orange)!important;transition:box-shadow .3s}

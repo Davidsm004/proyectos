@@ -366,11 +366,24 @@ function segState(s) {
   if (d < today) { let t = Date.parse(s.reopened_at || 0) || 0; S.comments.forEach(c => { if (c.project_id === s.id) t = Math.max(t, Date.parse(c.created_at) || 0); }); return t >= d.getTime() + 864e5 ? 'ok' : 'late'; } // vencido sin avances desde la fecha límite
   return (d - today) / 864e5 <= 2 ? 'soon' : 'ok';
 }
+function flashEl(sel) { setTimeout(() => { const el = document.querySelector(sel); if (el) { el.classList.add('flash'); el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' }); setTimeout(() => el.classList.remove('flash'), 2500); } }, 80); }
+function targetInfo(id) { // a qué elemento pertenece un id y cómo ir a él
+  const n = S.notes.find(x => x.id === id); if (n) return ['📝 Nota: ' + (n.title || 'Sin título'), () => { S.view = 'diary'; renderShell(); flashEl(`.kcard[data-id="${n.id}"]`); openNote(n.id); }];
+  const k = S.kcards.find(x => x.id === id); if (k) { const col = S.kcols.find(c => c.id === k.col_id), pp = k.project_id && findP(k.project_id);
+    if (!col && pp) return ['📁 Proyecto: ' + (pp.data.name || ''), () => { S.view = 'board'; S.bview = 'table'; renderShell(); openDrawer(pp.id, 'pnotes'); }];
+    return ['🗂 ' + (col ? col.name + ': ' : '') + k.title, () => { S.view = 'diary'; renderShell(); flashEl(`.kcard[data-id="${k.id}"]`); }]; }
+  const p = findP(id); if (p) return ['📁 ' + (p.parent_id ? 'Subtarea' : 'Proyecto') + ': ' + (p.data.name || ''), () => { S.view = 'board'; S.bview = 'table'; if (p.parent_id) S.open.add(p.parent_id); renderShell(); flashEl(`tr[data-id="${p.id}"]`); openDrawer(p.id, 'comments'); }];
+  const s = S.segs.find(x => x.id === id); if (s) return ['🚩 Seguimiento: ' + s.title, () => { S.view = 'follow'; S.ftab = s.status === 'done' ? 'done' : 'pend'; S.fopen = s.id; renderShell(); }];
+  return null;
+}
 function srcInfo(s) {
   const r = s.src; if (!r) return null;
-  if (r.type === 'note') { const n = S.notes.find(x => x.id === r.id); return n && ['📝 ' + (n.title || 'Nota'), () => { S.view = 'diary'; renderShell(); openNote(n.id); }]; }
-  if (r.type === 'card') { const k = S.kcards.find(x => x.id === r.id); return k && ['🗂 ' + k.title, () => go('diary')]; }
-  if (r.type === 'project') { const p = findP(r.id); return p && ['📁 ' + (p.data.name || 'Proyecto'), () => { S.view = 'board'; S.bview = 'table'; renderShell(); openDrawer(p.id, 'details'); }]; }
+  if (r.type === 'comment') { const c = S.comments.find(x => x.id === r.id), t = targetInfo(r.parent || c?.project_id); return t ? [t[0], t[1], c] : null; }
+  return targetInfo(r.id);
+}
+function segFromComment(c, parentId) {
+  const t = targetInfo(parentId), b = String(c.body || '').replace(/\s+/g, ' ').trim();
+  segForm(null, { title: (b.length > 70 ? b.slice(0, 70) + '…' : b) || 'Seguimiento de comentario', body: t ? 'Origen: ' + t[0] : '', src: { type: 'comment', id: c.id, parent: parentId } });
 }
 async function segForm(s, pre = {}) {
   const v = s || pre, today = iso(new Date());
@@ -402,11 +415,12 @@ function renderFollow(m) {
         ro ? null : h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones', onclick: e => menu(e.currentTarget, [{ label: 'Editar', run: () => segForm(s) },
           '-', { label: 'Eliminar', danger: true, run: async () => { if (!await confirmBox('Eliminar seguimiento', `¿Eliminar "${s.title}" y su historial?`)) return; S.segs = S.segs.filter(x => x.id !== s.id); render(); updateBell(); await q(sb.from('segs').delete().eq('id', s.id)); } }]) })),
       s.body ? h('p', { class: 'fu-body' }, s.body) : null,
+      src && src[2] ? h('blockquote', { class: 'fu-quote' }, h('small', {}, '💬 Comentario en seguimiento · ' + src[2].author_email + ' · ' + new Date(src[2].created_at).toLocaleString('es-CR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })), h('p', {}, src[2].body)) : null,
       h('div', { class: 'fu-meta' },
         h('span', {}, '📅 Vence ', h('b', {}, fd(s.due))), h('span', {}, '🔔 ', fq ? fq[1].replace(' (recomendado)', '') : 'Cada ' + s.freq_h + ' h'),
         h('span', {}, '🕒 Creado ', fd(s.created_at)), h('span', {}, '✍️ Último avance hace ', fmtAgo(Date.now() - segLast(s))),
         st === 'done' && s.done_at ? h('span', {}, '✅ Listo ', fd(s.done_at)) : null,
-        src ? h('button', { class: 'ktag kproj', onclick: src[1] }, src[0]) : null),
+        src ? h('button', { class: 'ktag kproj fu-src', title: 'Ir al origen', onclick: src[1] }, src[0] + ' ↗') : null),
       commentsBlock(s.id, () => render()));
   };
   const list = tab === 'pend' ? pend : done, late = pend.filter(s => segState(s) === 'late').length, soon = pend.filter(s => segState(s) === 'soon').length;
@@ -1324,6 +1338,7 @@ function commentsBlock(targetId, after) {
     const files = S.attachments.filter(x => x.project_id === c.id);
     wrap.append(h('div', { class: 'cm-item' },
       h('div', { class: 'cm-meta' }, h('span', { class: 'avatar', style: `width:20px;height:20px;font-size:9px;background:${hashColor(c.author_email)}` }, initials(c.author_email)), h('b', {}, c.author_email), h('span', {}, fdt(c.created_at)),
+        canEdit() && !S.segs.some(x => x.id === targetId) ? h('button', { class: 'link cm-fu', title: 'Convertir este comentario en seguimiento', onclick: () => segFromComment(c, targetId) }, '🚩 Seguimiento') : null,
         (c.author_id === S.user.id || isAdmin()) && canEdit() ? h('button', { class: 'link cm-del', onclick: async () => { if (!await confirmBox('Eliminar comentario', '¿Eliminar este comentario y sus adjuntos?')) return;
           if (files.length) { await sb.storage.from('attachments').remove(files.map(f => f.path)); await q(sb.from('attachments').delete().eq('project_id', c.id)); }
           await q(sb.from('comments').delete().eq('id', c.id)); S.comments = S.comments.filter(x => x.id !== c.id); S.attachments = S.attachments.filter(x => x.project_id !== c.id); after(); } }, 'Eliminar') : null),
@@ -1387,7 +1402,8 @@ function drawComments(p, body) {
   } }, 'Publicar'))),
   list.length ? list.map(c => h('div', { class: 'cmt' }, h('div', { class: 'meta' }, h('span', { class: 'avatar', style: `width:24px;height:24px;font-size:10px;background:${hashColor(c.author_email)}` }, initials(c.author_email)),
     h('b', {}, c.author_email || 'Usuario'), h('span', {}, new Date(c.created_at).toLocaleString('es-CR')),
-    (c.author_id === S.user.id || isAdmin()) ? h('button', { class: 'link', style: 'margin-left:auto;color:#B3261E;font-size:12px', onclick: async () => { await q(sb.from('comments').delete().eq('id', c.id)); S.comments = S.comments.filter(x => x.id !== c.id); render(); openDrawer(p.id, 'comments'); } }, 'Eliminar') : null),
+    canEdit() ? h('button', { class: 'link', style: 'margin-left:auto;font-size:12px', onclick: () => segFromComment(c, p.id) }, '🚩 Seguimiento') : null,
+    (c.author_id === S.user.id || isAdmin()) ? h('button', { class: 'link', style: 'color:#B3261E;font-size:12px', onclick: async () => { await q(sb.from('comments').delete().eq('id', c.id)); S.comments = S.comments.filter(x => x.id !== c.id); render(); openDrawer(p.id, 'comments'); } }, 'Eliminar') : null),
     h('p', {}, c.body))) : h('p', { class: 'muted' }, 'Sin comentarios todavía.')));
 }
 const ACCEPT = '.html,.htm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg';
