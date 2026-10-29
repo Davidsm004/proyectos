@@ -358,6 +358,18 @@ const hbar = (() => { const el = h('div', { id: 'hbar', 'aria-hidden': 'true' },
 
 /* ---------- Mis seguimientos ---------- */
 const FREQS = [[1, 'Cada hora'], [4, 'Cada 4 horas'], [8, 'Cada 8 horas'], [24, 'Cada día (recomendado)'], [48, 'Cada 2 días'], [72, 'Cada 3 días'], [168, 'Cada semana']];
+const UNITS = [['s', 'segundos', 1], ['m', 'minutos', 60], ['h', 'horas', 3600], ['d', 'días', 86400]];
+const freqSec = s => num(s.freq_s) || (num(s.freq_h) || 24) * 3600;
+const splitSec = sec => { const u = [...UNITS].reverse().find(([, , f]) => sec % f === 0) || UNITS[0]; return [sec / u[2], u[0]]; };
+const fmtFreq = sec => { const [n, u] = splitSec(sec), l = UNITS.find(x => x[0] === u)[1]; return 'Cada ' + n + ' ' + (n === 1 ? { s: 'segundo', m: 'minuto', h: 'hora', d: 'día' }[u] : l); };
+function freqCtl(sec, onSave, id) {
+  const [n, u] = splitSec(sec);
+  const num1 = h('input', { type: 'number', min: 1, step: 1, value: n, class: 'freq-n', id, 'aria-label': 'Cantidad' });
+  const unit = h('select', { class: 'freq-u', 'aria-label': 'Unidad' }, UNITS.map(([k, l]) => h('option', { value: k, selected: k === u }, l)));
+  const val = () => Math.max(1, Math.round(num(num1.value) || 1)) * UNITS.find(x => x[0] === unit.value)[2];
+  if (onSave) { num1.addEventListener('change', () => onSave(val())); unit.addEventListener('change', () => onSave(val())); }
+  return { el: h('span', { class: 'freq' }, num1, unit), val };
+}
 const fmtAgo = ms => { const hh = Math.floor(ms / 36e5); return hh < 1 ? 'menos de 1 h' : hh < 48 ? hh + ' h' : Math.floor(hh / 24) + ' días'; };
 function segLast(s) { let t = Date.parse(s.reopened_at || s.created_at) || Date.now(); S.comments.forEach(c => { if (c.project_id === s.id) t = Math.max(t, Date.parse(c.created_at) || 0); }); return t; }
 function segState(s) {
@@ -390,10 +402,11 @@ async function segForm(s, pre = {}) {
   const r = await ask(s ? 'Editar seguimiento' : 'Nuevo seguimiento', [
     { name: 'title', label: 'Título', value: v.title || '', required: true }, { name: 'body', label: 'Descripción o comentario', type: 'textarea', value: v.body || '' },
     { name: 'due', label: 'Fecha límite', type: 'date', value: v.due || iso(new Date(Date.now() + 3 * 864e5)) },
-    { name: 'freq', label: 'Alertar si no hay avances', type: 'select', value: String(v.freq_h || 24), options: FREQS.map(([x, l]) => ({ value: String(x), label: l })) },
+    { name: 'fn', label: 'Alertar si no hay avances: cada (cantidad)', type: 'number', value: splitSec(v.freq_s || (v.freq_h || 24) * 3600)[0] },
+    { name: 'fu', label: 'Unidad de la alerta', type: 'select', value: splitSec(v.freq_s || (v.freq_h || 24) * 3600)[1], options: UNITS.map(([k, l]) => ({ value: k, label: l })) },
     s ? { name: 'status', label: 'Estado', type: 'select', value: s.status, options: [{ value: 'pending', label: 'Pendiente' }, { value: 'done', label: 'Listo' }] } : null].filter(Boolean), s ? 'Guardar' : 'Crear');
   if (!r) return;
-  const data = { title: r.title.trim(), body: r.body.trim(), due: r.due || null, freq_h: Number(r.freq) || 24 };
+  const data = { title: r.title.trim(), body: r.body.trim(), due: r.due || null, freq_s: Math.max(1, Math.round(num(r.fn) || 1)) * UNITS.find(x => x[0] === r.fu)[2] };
   if (s) { if (r.status && r.status !== s.status) Object.assign(data, r.status === 'done' ? { status: 'done', done_at: new Date().toISOString() } : { status: 'pending', reopened_at: new Date().toISOString() });
     Object.assign(s, data); render(); await q(sb.from('segs').update(data).eq('id', s.id)); toast('Seguimiento actualizado', 'ok'); }
   else { const [row] = await q(sb.from('segs').insert({ ...data, status: 'pending', author: S.user.id, src: pre.src || null }).select()); S.segs.push(row); S.fopen = row.id; toast('Seguimiento creado · lo verás en Mis seguimientos', 'ok'); render(); }
@@ -408,7 +421,7 @@ function renderFollow(m) {
   const LBL = { late: 'Atrasado', soon: 'Próximo a vencer', ok: 'Al día', done: 'Listo' };
   const fd = d => d ? new Date(d).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
   const cardOf = s => {
-    const st = segState(s), src = srcInfo(s), nc = S.comments.filter(c => c.project_id === s.id).length, fq = FREQS.find(f => f[0] === (num(s.freq_h) || 24));
+    const st = segState(s), src = srcInfo(s), nc = S.comments.filter(c => c.project_id === s.id).length, fc = freqCtl(freqSec(s), ro ? null : sec => setSeg(s, { freq_s: sec }).then(() => toast('Alerta: ' + fmtFreq(sec).toLowerCase(), 'ok')));
     return h('article', { class: 'fu st-' + st, 'data-id': s.id },
       h('div', { class: 'fu-top' }, h('span', { class: 'fu-badge' }, LBL[st]), h('b', { class: 'fu-title' }, s.title),
         ro ? null : h('button', { class: 'btn ' + (st === 'done' ? '' : 'primary'), onclick: () => st === 'done' ? setSeg(s, { status: 'pending', reopened_at: new Date().toISOString() }).then(() => toast('Reabierto: vuelve a Pendientes', 'ok')) : setSeg(s, { status: 'done', done_at: new Date().toISOString() }).then(() => toast('Marcado como listo', 'ok')) }, st === 'done' ? '↺ Reabrir' : '✓ Listo'),
@@ -417,7 +430,7 @@ function renderFollow(m) {
       s.body ? h('p', { class: 'fu-body' }, s.body) : null,
       src && src[2] ? h('blockquote', { class: 'fu-quote' }, h('small', {}, '💬 Comentario en seguimiento · ' + src[2].author_email + ' · ' + new Date(src[2].created_at).toLocaleString('es-CR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })), h('p', {}, src[2].body)) : null,
       h('div', { class: 'fu-meta' },
-        h('span', {}, '📅 Vence ', h('b', {}, fd(s.due))), h('span', {}, '🔔 ', fq ? fq[1].replace(' (recomendado)', '') : 'Cada ' + s.freq_h + ' h'),
+        h('span', {}, '📅 Vence ', h('b', {}, fd(s.due))), ro ? h('span', {}, '🔔 ' + fmtFreq(freqSec(s))) : h('label', { class: 'fu-freq', title: 'Cada cuánto avisar si no hay avances' }, '🔔 Alertar cada ', fc.el),
         h('span', {}, '🕒 Creado ', fd(s.created_at)), h('span', {}, '✍️ Último avance hace ', fmtAgo(Date.now() - segLast(s))),
         st === 'done' && s.done_at ? h('span', {}, '✅ Listo ', fd(s.done_at)) : null,
         src ? h('button', { class: 'ktag kproj fu-src', title: 'Ir al origen', onclick: src[1] }, src[0] + ' ↗') : null),
@@ -457,7 +470,7 @@ function dueItems() {
   for (const k of S.kcards) { if (k.author !== S.user.id || k.done || !k.due) continue; const col = S.kcols.find(c => c.id === k.col_id);
     const pp = k.project_id && findP(k.project_id); push(`k:${k.id}:${k.due}`, k.due, k.title, (col ? 'Pendiente con ' + col.name : 'Nota') + (pp ? ' · ' + pp.data.name : ''), () => { if (col || !pp) { S.view = 'diary'; renderShell(); } else { S.view = 'board'; renderShell(); openDrawer(pp.id, 'pnotes'); } }); }
   for (const s of S.segs) { if (s.author !== S.user.id || s.status === 'done') continue;
-    const st = segState(s), last = segLast(s), fq = (num(s.freq_h) || 24) * 36e5, open = () => { S.view = 'follow'; S.ftab = 'pend'; S.fopen = s.id; renderShell(); };
+    const st = segState(s), last = segLast(s), fq = freqSec(s) * 1000, open = () => { S.view = 'follow'; S.ftab = 'pend'; S.fopen = s.id; renderShell(); };
     const bucket = Math.floor((Date.now() - last) / fq);
     if (bucket >= 1) { const key = `s:${s.id}:${last}:${bucket}`; if (!dis.has(key)) out.push({ key, d: new Date(Date.now()), title: s.title, sub: `Seguimiento sin avances hace ${fmtAgo(Date.now() - last)}` + (st === 'late' ? ' · ATRASADO' : ''), open, late: st === 'late' }); }
     else if (s.due && (st === 'late' || st === 'soon')) { const key = `sd:${s.id}:${s.due}:${st}`; if (!dis.has(key)) out.push({ key, d: dOf(s.due), title: s.title, sub: st === 'late' ? 'Seguimiento atrasado' : 'Seguimiento por vencer', open, late: st === 'late' }); }
@@ -474,7 +487,7 @@ function notifPanel(anchor) {
   let draw = () => {
     const items = dueItems(), fmt = d => d.toLocaleDateString('es-CR', { weekday: 'short', day: 'numeric', month: 'short' });
     const days = d => { const n = Math.round((d - new Date(new Date().toDateString())) / 864e5); return n < 0 ? `Vencida hace ${-n} día${n === -1 ? '' : 's'}` : n === 0 ? 'Vence hoy' : n === 1 ? 'Vence mañana' : 'Vence en 2 días'; };
-    box.replaceChildren(h('div', { class: 'notif-head' }, h('b', {}, 'Notificaciones'), ('Notification' in window) && Notification.permission !== 'granted' ? h('button', { class: 'link', onclick: async () => { const r = await Notification.requestPermission(); toast(r === 'granted' ? 'Alertas de escritorio activadas' : 'El navegador bloqueó las alertas', r === 'granted' ? 'ok' : 'err'); if (r === 'granted') desktopNotify(activeReminders()); } }, '🔔 Alertas en escritorio') : null, items.length ? h('button', { class: 'link', onclick: async () => { await dismiss(items.map(i => i.key)); draw(); } }, 'Eliminar todas') : null),
+    box.replaceChildren(h('div', { class: 'notif-rep' }, h('span', {}, '🔁 Repetir avisos cada'), freqCtl(repSec(), setRep).el), h('div', { class: 'notif-head' }, h('b', {}, 'Notificaciones'), ('Notification' in window) && Notification.permission !== 'granted' ? h('button', { class: 'link', onclick: async () => { const r = await Notification.requestPermission(); toast(r === 'granted' ? 'Alertas de escritorio activadas' : 'El navegador bloqueó las alertas', r === 'granted' ? 'ok' : 'err'); if (r === 'granted') desktopNotify(activeReminders()); } }, '🔔 Alertas en escritorio') : null, items.length ? h('button', { class: 'link', onclick: async () => { await dismiss(items.map(i => i.key)); draw(); } }, 'Eliminar todas') : null),
       h('div', {}, items.length ? items.map(it => h('div', { class: 'notif' + (it.late ? ' late' : '') },
         h('button', { class: 'notif-main', onclick: () => { closePop(); it.open(); } }, h('b', {}, it.title), h('span', {}, it.sub), h('em', {}, days(it.d) + ' · ' + fmt(it.d))),
         h('button', { class: 'icon-btn', svg: I.x, title: 'Eliminar notificación', 'aria-label': 'Eliminar notificación', onclick: async () => { await dismiss([it.key]); draw(); } })))
@@ -492,10 +505,18 @@ const remState = () => { try { return JSON.parse(localStorage.getItem(RKEY)) || 
 const saveRem = s => { try { localStorage.setItem(RKEY, JSON.stringify(s)); } catch (e) {} };
 const whenTxt = d => { const n = Math.round((d - new Date(new Date().toDateString())) / 864e5); return n < 0 ? `Vencida (${-n} d)` : n === 0 ? 'Hoy' : n === 1 ? 'Mañana' : 'En 2 días'; };
 function activeReminders() { const s = remState(), now = Date.now(); return dueItems().filter(it => !(s.snooze[it.key] > now)); }
+const repSec = () => { try { return Number(localStorage.getItem('lpp-rep')) || 86400; } catch (e) { return 86400; } };
+function setRep(sec) { try { localStorage.setItem('lpp-rep', String(sec)); } catch (e) {} toast('Los avisos se repetirán ' + fmtFreq(sec).toLowerCase(), 'ok'); }
+function snoozeMenu(anchor, keys, after) {
+  const doS = ms => { const s = remState(); keys.forEach(k => s.snooze[k] = Date.now() + ms); saveRem(s); after(); };
+  menu(anchor, [{ label: '30 segundos', run: () => doS(3e4) }, { label: '5 minutos', run: () => doS(3e5) }, { label: '15 minutos', run: () => doS(9e5) }, { label: '1 hora', run: () => doS(36e5) }, { label: '4 horas', run: () => doS(144e5) }, { label: '1 día', run: () => doS(864e5) },
+    '-', { label: 'Personalizado…', run: async () => { const r = await ask('Posponer aviso', [{ name: 'n', label: 'Cantidad', type: 'number', value: 10, required: true }, { name: 'u', label: 'Unidad', type: 'select', value: 'm', options: UNITS.map(([k, l]) => ({ value: k, label: l })) }], 'Posponer'); if (r) doS(Math.max(1, num(r.n) || 1) * UNITS.find(x => x[0] === r.u)[2] * 1000); } }]);
+}
 function desktopNotify(items) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const s = remState(), today = new Date().toDateString();
-  items.forEach(it => { if (s.shown[it.key] === today) return; s.shown[it.key] = today;
+  const rp = repSec() * 1000, nowT = Date.now();
+  items.forEach(it => { const last = typeof s.shown[it.key] === 'number' ? s.shown[it.key] : (s.shown[it.key] === today ? nowT : 0); if (it.key.startsWith('s:') ? last : nowT - last < rp) return; s.shown[it.key] = nowT;
     try { const n = new Notification('Liberty · Pendiente por vencer', { body: `${it.title}\n${it.sub} · ${whenTxt(it.d)}`, icon: 'favicon.png', badge: 'favicon.png', tag: it.key, requireInteraction: true });
       n.onclick = () => { window.focus(); n.close(); it.open(); }; } catch (e) {} });
   saveRem(s);
@@ -503,9 +524,11 @@ function desktopNotify(items) {
 function reminderCard(force) {
   const items = activeReminders(); let card = $('#reminders');
   if (!items.length) { card?.remove(); return; }
-  if (!card && !force && sessionStorage.getItem('lpp-rem-closed') === String(items.length)) return;
+  const sig = items.map(i => i.key).join('|');
+  if (!card && !force && sessionStorage.getItem('lpp-rem-closed') === sig) return;
+  if (card && !force && card.dataset.sig === sig) return;
   card?.remove();
-  const close = () => { card.remove(); try { sessionStorage.setItem('lpp-rem-closed', String(items.length)); } catch (e) {} };
+  const close = () => { card.remove(); try { sessionStorage.setItem('lpp-rem-closed', sig); } catch (e) {} };
   const snooze = (keys, ms) => { const s = remState(); keys.forEach(k => s.snooze[k] = Date.now() + ms); saveRem(s); reminderCard(true); };
   const perm = ('Notification' in window) && Notification.permission === 'default';
   card = h('aside', { id: 'reminders', role: 'dialog', 'aria-label': 'Recordatorios' },
@@ -514,10 +537,10 @@ function reminderCard(force) {
       h('span', { class: 'rem-ico', svg: I.cal }),
       h('button', { class: 'rem-main', onclick: () => { close(); it.open(); } }, h('b', {}, it.title), h('span', {}, it.sub)),
       h('div', { class: 'rem-side' }, h('em', {}, whenTxt(it.d)),
-        h('div', { class: 'rem-acts' }, h('button', { title: 'Recordar en 1 hora', onclick: () => snooze([it.key], 36e5) }, '1 h'), h('button', { title: 'Descartar', onclick: async () => { await dismiss([it.key]); reminderCard(true); } }, 'Descartar')))))),
+        h('div', { class: 'rem-acts' }, h('button', { title: 'Posponer', onclick: e => snoozeMenu(e.currentTarget, [it.key], () => reminderCard(true)) }, '⏱ Posponer'), h('button', { title: 'Descartar', onclick: async () => { await dismiss([it.key]); reminderCard(true); } }, 'Descartar')))))),
     h('footer', {}, perm ? h('button', { class: 'btn', onclick: async () => { const r = await Notification.requestPermission(); if (r === 'granted') { toast('Alertas de escritorio activadas', 'ok'); desktopNotify(activeReminders()); } reminderCard(true); } }, 'Activar alertas en el escritorio') : h('span'),
-      h('div', { style: 'display:flex;gap:6px' }, h('button', { class: 'btn', onclick: () => snooze(items.map(i => i.key), 36e5) }, 'Posponer todos 1 h'), h('button', { class: 'btn primary', onclick: async () => { await dismiss(items.map(i => i.key)); card.remove(); } }, 'Descartar todos'))));
-  document.body.append(card);
+      h('div', { style: 'display:flex;gap:6px' }, h('button', { class: 'btn', onclick: e => snoozeMenu(e.currentTarget, items.map(i => i.key), () => reminderCard(true)) }, '⏱ Posponer todos'), h('button', { class: 'btn primary', onclick: async () => { await dismiss(items.map(i => i.key)); card.remove(); } }, 'Descartar todos'))));
+  card.dataset.sig = sig; document.body.append(card);
 }
 function testReminder() {
   const it = { key: 'test:' + Date.now(), d: new Date(new Date().toDateString()), title: 'Recordatorio de prueba', sub: 'Así se verán tus pendientes por vencer', open: () => toast('Este es un recordatorio de prueba', 'ok') };
@@ -534,7 +557,7 @@ function testReminder() {
   }
 }
 let remTimer;
-function startReminders() { clearInterval(remTimer); const tick = () => { if (!S.user) return; const items = activeReminders(); desktopNotify(items); reminderCard(false); updateBell(); }; setTimeout(tick, 1500); remTimer = setInterval(tick, 60000); }
+function startReminders() { clearInterval(remTimer); const tick = () => { if (!S.user) return; const items = activeReminders(); desktopNotify(items); reminderCard(false); updateBell(); }; setTimeout(tick, 1500); remTimer = setInterval(tick, 5000); }
 
 /* ---------- bloqueo por inactividad (10 min) ---------- */
 let lockTimer;

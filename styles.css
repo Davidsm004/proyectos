@@ -612,3 +612,10 @@ tr.drop-on td{background:rgba(0,128,232,.1)!important}
 .fu-src{font-weight:600}
 .cm-fu{font-size:11px;margin-left:auto}.cm-fu+.cm-del{margin-left:6px}
 .kcard.flash,tr.flash td{box-shadow:0 0 0 3px var(--orange)!important;transition:box-shadow .3s}
+
+.freq{display:inline-flex;gap:4px;align-items:center}
+.freq-n{width:60px;border:1px solid var(--g400);border-radius:6px;padding:3px 6px;font-size:12px;background:#fff}
+.freq-u{border:1px solid var(--g400);border-radius:6px;padding:3px 4px;font-size:12px;background:#fff}
+.fu-freq{display:inline-flex;align-items:center;gap:6px;background:#EAF4FE;border-radius:999px;padding:3px 4px 3px 10px;font-weight:600;color:var(--blue)}
+.notif-rep{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--g700);padding:6px;background:var(--g100);border-radius:8px;margin-bottom:6px}
+[data-theme=dark] .freq-n,[data-theme=dark] .freq-u{background:#0F1424;color:var(--g900)}[data-theme=dark] .fu-freq{background:rgba(0,128,232,.18);color:#7CC4FF}
