@@ -370,6 +370,16 @@ function freqCtl(sec, onSave, id) {
   if (onSave) { num1.addEventListener('change', () => onSave(val())); unit.addEventListener('change', () => onSave(val())); }
   return { el: h('span', { class: 'freq' }, num1, unit), val };
 }
+function nextAlert(s) { // momento del próximo aviso (respeta lo pospuesto)
+  const last = segLast(s), fq = freqSec(s) * 1000, b = Math.floor((Date.now() - last) / fq);
+  let t = last + (b + 1) * fq; const sn = remState().snooze[`s:${s.id}:${last}:${b}`];
+  if (b >= 1 && sn > Date.now()) t = Math.min(t, sn);
+  return { t, now: b >= 1 && !(sn > Date.now()) && !(S.settings[dismissKey()] || []).includes(`s:${s.id}:${last}:${b}`) };
+}
+function fmtLeft(ms) { const x = Math.max(0, Math.round(ms / 1000)), d = Math.floor(x / 86400), hh = Math.floor(x % 86400 / 3600), mm = Math.floor(x % 3600 / 60), ss = x % 60;
+  return d ? `${d} d ${hh} h` : hh ? `${hh} h ${mm} min` : mm ? `${mm} min ${ss} s` : `${ss} s`; }
+function nextTxt(s) { const n = nextAlert(s); return (n.now ? '🔔 Avisando ahora · siguiente en ' : '⏳ Próximo aviso en ') + fmtLeft(n.t - Date.now()); }
+setInterval(() => document.querySelectorAll('.fu-next').forEach(el => { const s = S.segs.find(x => x.id === el.dataset.sid); if (s) { el.textContent = nextTxt(s); el.classList.toggle('now', nextAlert(s).now); } }), 1000);
 const fmtAgo = ms => { const hh = Math.floor(ms / 36e5); return hh < 1 ? 'menos de 1 h' : hh < 48 ? hh + ' h' : Math.floor(hh / 24) + ' días'; };
 function segLast(s) { let t = Date.parse(s.reopened_at || s.created_at) || Date.now(); S.comments.forEach(c => { if (c.project_id === s.id) t = Math.max(t, Date.parse(c.created_at) || 0); }); return t; }
 function segState(s) {
@@ -430,7 +440,8 @@ function renderFollow(m) {
       s.body ? h('p', { class: 'fu-body' }, s.body) : null,
       src && src[2] ? h('blockquote', { class: 'fu-quote' }, h('small', {}, '💬 Comentario en seguimiento · ' + src[2].author_email + ' · ' + new Date(src[2].created_at).toLocaleString('es-CR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })), h('p', {}, src[2].body)) : null,
       h('div', { class: 'fu-meta' },
-        h('span', {}, '📅 Vence ', h('b', {}, fd(s.due))), ro ? h('span', {}, '🔔 ' + fmtFreq(freqSec(s))) : h('label', { class: 'fu-freq', title: 'Cada cuánto avisar si no hay avances' }, '🔔 Alertar cada ', fc.el),
+        h('span', {}, '📅 Vence ', h('b', {}, fd(s.due))), st !== 'done' ? h('span', { class: 'fu-next', 'data-sid': s.id }, nextTxt(s)) : null,
+        ro ? h('span', {}, '🔔 ' + fmtFreq(freqSec(s))) : h('label', { class: 'fu-freq', title: 'Cada cuánto avisar si no hay avances' }, '🔔 Alertar cada ', fc.el),
         h('span', {}, '🕒 Creado ', fd(s.created_at)), h('span', {}, '✍️ Último avance hace ', fmtAgo(Date.now() - segLast(s))),
         st === 'done' && s.done_at ? h('span', {}, '✅ Listo ', fd(s.done_at)) : null,
         src ? h('button', { class: 'ktag kproj fu-src', title: 'Ir al origen', onclick: src[1] }, src[0] + ' ↗') : null),
