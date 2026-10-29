@@ -31,6 +31,7 @@ const I = {
   list: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4h12M2 8h12M2 12h12"/></svg>',
   book: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 2.5h7.5A2.5 2.5 0 0113 5v8.5H5.5A2.5 2.5 0 013 11z"/><path d="M3 11a2 2 0 012-2h8"/></svg>',
   cal: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M5 1.5v3M11 1.5v3M5 9.5h4M5 11.5h6"/></svg>',
+  flag: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 14V2.5M3 3h8l-1.5 3L11 9H3"/></svg>',
   moon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13.5 9.5A5.5 5.5 0 016.5 2.5a5.5 5.5 0 107 7z"/></svg>',
   sun: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3"/></svg>',
   bell: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 11V7a4 4 0 018 0v4l1.5 1.5h-11z"/><path d="M6.5 14a1.6 1.6 0 003 0"/></svg>',
@@ -202,11 +203,11 @@ async function enter(user) {
   if (!S.projects.length && canEdit()) { S.view = 'new'; renderShell(); toast('Importa tu Excel de proyectos para comenzar', 'ok'); }
 }
 async function loadAll() {
-  const [g, c, p, cm, at, st, nt, kc, kd] = await Promise.all([
+  const [g, c, p, cm, at, st, nt, kc, kd, sg] = await Promise.all([
     q(sb.from('groups').select('*').order('position')), q(sb.from('columns').select('*').order('position')),
     q(sb.from('projects').select('*').order('position')), q(sb.from('comments').select('*').order('created_at', { ascending: false })),
-    q(sb.from('attachments').select('*').order('created_at', { ascending: false })), q(sb.from('settings').select('*')), q(sb.from('notes').select('*')), q(sb.from('kcols').select('*')), q(sb.from('kcards').select('*'))]);
-  Object.assign(S, { groups: g, columns: c, projects: p.map(x => ({ ...x, data: x.data || {} })), comments: cm, attachments: at, settings: Object.fromEntries(st.map(s => [s.key, s.value])), notes: nt || [], kcols: kc || [], kcards: kd || [] });
+    q(sb.from('attachments').select('*').order('created_at', { ascending: false })), q(sb.from('settings').select('*')), q(sb.from('notes').select('*')), q(sb.from('kcols').select('*')), q(sb.from('kcards').select('*')), q(sb.from('segs').select('*'))]);
+  Object.assign(S, { groups: g, columns: c, projects: p.map(x => ({ ...x, data: x.data || {} })), comments: cm, attachments: at, settings: Object.fromEntries(st.map(s => [s.key, s.value])), notes: nt || [], kcols: kc || [], kcards: kd || [], segs: sg || [] });
 }
 function subscribe() {
   if (!sb.channel) return;
@@ -225,7 +226,8 @@ function renderShell() {
       h('nav', { class: 'nav', 'aria-label': 'Principal' },
         h('button', { id: 'nav-new', class: S.view === 'new' ? 'on' : '', onclick: () => go('new') }, h('span', { svg: I.plus }), 'Ingresar proyectos'),
         h('button', { id: 'nav-board', class: S.view === 'board' ? 'on' : '', onclick: () => go('board') }, h('span', { svg: I.list }), 'Ver proyectos'),
-        h('button', { id: 'nav-diary', class: S.view === 'diary' ? 'on' : '', onclick: () => go('diary') }, h('span', { svg: I.book }), 'Mis notas')),
+        h('button', { id: 'nav-diary', class: S.view === 'diary' ? 'on' : '', onclick: () => go('diary') }, h('span', { svg: I.book }), 'Mis notas'),
+        h('button', { id: 'nav-follow', class: S.view === 'follow' ? 'on' : '', onclick: () => go('follow') }, h('span', { svg: I.flag }), 'Mis seguimientos')),
       h('div', { class: 'right' }, h('button', { class: 'icon-btn bell', id: 'theme-btn', 'aria-label': 'Modo noche', title: 'Modo noche / día', onclick: toggleTheme }, h('span', { svg: document.documentElement.dataset.theme === 'dark' ? I.sun : I.moon })), h('button', { class: 'icon-btn bell', id: 'bell', 'aria-label': 'Notificaciones', title: 'Notificaciones', onclick: e => notifPanel(e.currentTarget) }, h('span', { svg: I.bell }), h('b', { id: 'bell-n', class: 'hidden' })), h('button', { class: 'role-chip lock-chip', title: 'Bloquear pantalla', 'aria-label': 'Bloquear pantalla', onclick: lockScreen }, h('span', { svg: I.lock }), p.role),
         h('button', { class: 'icon-btn', style: 'width:auto;height:auto', title: p.email, 'aria-label': 'Cuenta', onclick: e => menu(e.currentTarget, [
           { label: p.email, run: () => {} }, { label: '🔒 Bloquear pantalla', run: lockScreen }, { label: '🔔 Probar recordatorio', run: testReminder }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
@@ -242,6 +244,7 @@ function render() {
   const m = $('#main'); if (!m) return;
   if (S.view === 'new') return renderNew(m);
   if (S.view === 'diary') return renderDiary(m);
+  if (S.view === 'follow') return renderFollow(m);
   const keep = {}; m.querySelectorAll('[data-scroll]').forEach(el => keep[el.dataset.scroll] = el.scrollLeft);
   renderBoard(m);
   m.querySelectorAll('[data-scroll]').forEach(el => { if (keep[el.dataset.scroll]) el.scrollLeft = keep[el.dataset.scroll]; });
@@ -353,6 +356,75 @@ const hbar = (() => { const el = h('div', { id: 'hbar', 'aria-hidden': 'true' },
   return { update };
 })();
 
+/* ---------- Mis seguimientos ---------- */
+const FREQS = [[1, 'Cada hora'], [4, 'Cada 4 horas'], [8, 'Cada 8 horas'], [24, 'Cada día (recomendado)'], [48, 'Cada 2 días'], [72, 'Cada 3 días'], [168, 'Cada semana']];
+const fmtAgo = ms => { const hh = Math.floor(ms / 36e5); return hh < 1 ? 'menos de 1 h' : hh < 48 ? hh + ' h' : Math.floor(hh / 24) + ' días'; };
+function segLast(s) { let t = Date.parse(s.reopened_at || s.created_at) || Date.now(); S.comments.forEach(c => { if (c.project_id === s.id) t = Math.max(t, Date.parse(c.created_at) || 0); }); return t; }
+function segState(s) {
+  if (s.status === 'done') return 'done';
+  const today = new Date(new Date().toDateString()), d = s.due && dOf(s.due); if (!d) return 'ok';
+  if (d < today) { let t = Date.parse(s.reopened_at || 0) || 0; S.comments.forEach(c => { if (c.project_id === s.id) t = Math.max(t, Date.parse(c.created_at) || 0); }); return t >= d.getTime() + 864e5 ? 'ok' : 'late'; } // vencido sin avances desde la fecha límite
+  return (d - today) / 864e5 <= 2 ? 'soon' : 'ok';
+}
+function srcInfo(s) {
+  const r = s.src; if (!r) return null;
+  if (r.type === 'note') { const n = S.notes.find(x => x.id === r.id); return n && ['📝 ' + (n.title || 'Nota'), () => { S.view = 'diary'; renderShell(); openNote(n.id); }]; }
+  if (r.type === 'card') { const k = S.kcards.find(x => x.id === r.id); return k && ['🗂 ' + k.title, () => go('diary')]; }
+  if (r.type === 'project') { const p = findP(r.id); return p && ['📁 ' + (p.data.name || 'Proyecto'), () => { S.view = 'board'; S.bview = 'table'; renderShell(); openDrawer(p.id, 'details'); }]; }
+}
+async function segForm(s, pre = {}) {
+  const v = s || pre, today = iso(new Date());
+  const r = await ask(s ? 'Editar seguimiento' : 'Nuevo seguimiento', [
+    { name: 'title', label: 'Título', value: v.title || '', required: true }, { name: 'body', label: 'Descripción o comentario', type: 'textarea', value: v.body || '' },
+    { name: 'due', label: 'Fecha límite', type: 'date', value: v.due || iso(new Date(Date.now() + 3 * 864e5)) },
+    { name: 'freq', label: 'Alertar si no hay avances', type: 'select', value: String(v.freq_h || 24), options: FREQS.map(([x, l]) => ({ value: String(x), label: l })) },
+    s ? { name: 'status', label: 'Estado', type: 'select', value: s.status, options: [{ value: 'pending', label: 'Pendiente' }, { value: 'done', label: 'Listo' }] } : null].filter(Boolean), s ? 'Guardar' : 'Crear');
+  if (!r) return;
+  const data = { title: r.title.trim(), body: r.body.trim(), due: r.due || null, freq_h: Number(r.freq) || 24 };
+  if (s) { if (r.status && r.status !== s.status) Object.assign(data, r.status === 'done' ? { status: 'done', done_at: new Date().toISOString() } : { status: 'pending', reopened_at: new Date().toISOString() });
+    Object.assign(s, data); render(); await q(sb.from('segs').update(data).eq('id', s.id)); toast('Seguimiento actualizado', 'ok'); }
+  else { const [row] = await q(sb.from('segs').insert({ ...data, status: 'pending', author: S.user.id, src: pre.src || null }).select()); S.segs.push(row); S.fopen = row.id; toast('Seguimiento creado · lo verás en Mis seguimientos', 'ok'); render(); }
+  updateBell();
+}
+async function setSeg(s, v) { Object.assign(s, v); render(); updateBell(); await q(sb.from('segs').update(v).eq('id', s.id)); }
+function renderFollow(m) {
+  const ro = !canEdit(), qq = norm(S.fq || ''), mine = S.segs.filter(s => s.author === S.user.id && (!qq || norm(s.title).includes(qq) || norm(s.body).includes(qq)));
+  const ord = { late: 0, soon: 1, ok: 2, done: 3 }, tab = S.ftab || 'pend';
+  const pend = mine.filter(s => s.status !== 'done').sort((a, b) => (ord[segState(a)] - ord[segState(b)]) || String(a.due || '9').localeCompare(String(b.due || '9')));
+  const done = mine.filter(s => s.status === 'done').sort((a, b) => String(b.done_at).localeCompare(String(a.done_at)));
+  const LBL = { late: 'Atrasado', soon: 'Próximo a vencer', ok: 'Al día', done: 'Listo' };
+  const fd = d => d ? new Date(d).toLocaleDateString('es-CR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const cardOf = s => {
+    const st = segState(s), src = srcInfo(s), nc = S.comments.filter(c => c.project_id === s.id).length, fq = FREQS.find(f => f[0] === (num(s.freq_h) || 24));
+    return h('article', { class: 'fu st-' + st, 'data-id': s.id },
+      h('div', { class: 'fu-top' }, h('span', { class: 'fu-badge' }, LBL[st]), h('b', { class: 'fu-title' }, s.title),
+        ro ? null : h('button', { class: 'btn ' + (st === 'done' ? '' : 'primary'), onclick: () => st === 'done' ? setSeg(s, { status: 'pending', reopened_at: new Date().toISOString() }).then(() => toast('Reabierto: vuelve a Pendientes', 'ok')) : setSeg(s, { status: 'done', done_at: new Date().toISOString() }).then(() => toast('Marcado como listo', 'ok')) }, st === 'done' ? '↺ Reabrir' : '✓ Listo'),
+        ro ? null : h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones', onclick: e => menu(e.currentTarget, [{ label: 'Editar', run: () => segForm(s) },
+          '-', { label: 'Eliminar', danger: true, run: async () => { if (!await confirmBox('Eliminar seguimiento', `¿Eliminar "${s.title}" y su historial?`)) return; S.segs = S.segs.filter(x => x.id !== s.id); render(); updateBell(); await q(sb.from('segs').delete().eq('id', s.id)); } }]) })),
+      s.body ? h('p', { class: 'fu-body' }, s.body) : null,
+      h('div', { class: 'fu-meta' },
+        h('span', {}, '📅 Vence ', h('b', {}, fd(s.due))), h('span', {}, '🔔 ', fq ? fq[1].replace(' (recomendado)', '') : 'Cada ' + s.freq_h + ' h'),
+        h('span', {}, '🕒 Creado ', fd(s.created_at)), h('span', {}, '✍️ Último avance hace ', fmtAgo(Date.now() - segLast(s))),
+        st === 'done' && s.done_at ? h('span', {}, '✅ Listo ', fd(s.done_at)) : null,
+        src ? h('button', { class: 'ktag kproj', onclick: src[1] }, src[0]) : null),
+      commentsBlock(s.id, () => render()));
+  };
+  const list = tab === 'pend' ? pend : done, late = pend.filter(s => segState(s) === 'late').length, soon = pend.filter(s => segState(s) === 'soon').length;
+  const search = h('input', { class: 'input', type: 'search', id: 'fq', placeholder: 'Buscar seguimientos…', value: S.fq || '', 'aria-label': 'Buscar seguimientos',
+    oninput: e => { S.fq = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#fq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
+  m.replaceChildren(h('div', { class: 'page-head hero' }, h('div', {}, h('h1', {}, 'Mis seguimientos'), h('p', {}, 'Centro de control para que ninguna tarea se quede olvidada')),
+      ro ? null : h('button', { class: 'btn accent', id: 'btn-seg', onclick: () => segForm(null) }, h('span', { svg: I.plus }), 'Nuevo seguimiento')),
+    h('section', { class: 'kpis fu-kpis' },
+      h('div', { class: 'kpi' }, h('div', { class: 'l' }, 'Pendientes'), h('div', { class: 'v' }, pend.length)),
+      h('div', { class: 'kpi r' }, h('div', { class: 'l' }, 'Atrasados'), h('div', { class: 'v', style: late ? 'color:#B3261E' : '' }, late)),
+      h('div', { class: 'kpi o' }, h('div', { class: 'l' }, 'Próximos a vencer'), h('div', { class: 'v' }, soon)),
+      h('div', { class: 'kpi g' }, h('div', { class: 'l' }, 'Listos'), h('div', { class: 'v' }, done.length))),
+    h('div', { class: 'toolbar' }, h('div', { class: 'seg', role: 'tablist' }, [['pend', `Pendientes (${pend.length})`], ['done', `Listos (${done.length})`]].map(([k, l]) => h('button', { class: tab === k ? 'on' : '', role: 'tab', onclick: () => { S.ftab = k; render(); } }, l))),
+      h('div', { class: 'search' }, h('span', { svg: I.search }), search)),
+    h('div', { class: 'fu-list' }, list.length ? list.map(cardOf) : h('div', { class: 'card empty-state' }, tab === 'pend' ? 'No tienes seguimientos pendientes.' : 'Aún no hay seguimientos listos.')));
+  if (S.fopen) { const el = m.querySelector(`.fu[data-id="${S.fopen}"]`); S.fopen = null; if (el) { el.classList.add('flash'); setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50); } }
+}
+
 /* ---------- notificaciones: fechas que vencen en 2 días o menos ---------- */
 const dismissKey = () => 'notif:' + S.user.id;
 function dueItems() {
@@ -370,6 +442,12 @@ function dueItems() {
   }
   for (const k of S.kcards) { if (k.author !== S.user.id || k.done || !k.due) continue; const col = S.kcols.find(c => c.id === k.col_id);
     const pp = k.project_id && findP(k.project_id); push(`k:${k.id}:${k.due}`, k.due, k.title, (col ? 'Pendiente con ' + col.name : 'Nota') + (pp ? ' · ' + pp.data.name : ''), () => { if (col || !pp) { S.view = 'diary'; renderShell(); } else { S.view = 'board'; renderShell(); openDrawer(pp.id, 'pnotes'); } }); }
+  for (const s of S.segs) { if (s.author !== S.user.id || s.status === 'done') continue;
+    const st = segState(s), last = segLast(s), fq = (num(s.freq_h) || 24) * 36e5, open = () => { S.view = 'follow'; S.ftab = 'pend'; S.fopen = s.id; renderShell(); };
+    const bucket = Math.floor((Date.now() - last) / fq);
+    if (bucket >= 1) { const key = `s:${s.id}:${last}:${bucket}`; if (!dis.has(key)) out.push({ key, d: new Date(Date.now()), title: s.title, sub: `Seguimiento sin avances hace ${fmtAgo(Date.now() - last)}` + (st === 'late' ? ' · ATRASADO' : ''), open, late: st === 'late' }); }
+    else if (s.due && (st === 'late' || st === 'soon')) { const key = `sd:${s.id}:${s.due}:${st}`; if (!dis.has(key)) out.push({ key, d: dOf(s.due), title: s.title, sub: st === 'late' ? 'Seguimiento atrasado' : 'Seguimiento por vencer', open, late: st === 'late' }); }
+  }
   return out.sort((a, b) => a.d - b.d);
 }
 function updateBell() { const n = $('#bell-n'); if (!n) return; const c = dueItems().length; n.textContent = c > 99 ? '99+' : c; n.classList.toggle('hidden', !c); }
@@ -537,6 +615,7 @@ function openNote(id) {
   const files = h('div', {}); drawFiles(cur, files, () => { render(); openNote(cur.id); });
   const dr = h('aside', { class: 'drawer note-drawer', role: 'dialog', 'aria-label': 'Nota' },
     h('div', { class: 'drawer-head' }, h('input', { class: 'input note-title', id: 'note-title', value: cur.title || '', placeholder: 'Título', disabled: ro, 'aria-label': 'Título', oninput: e => { cur.title = e.target.value; saveNote(cur); } }),
+      ro ? null : h('button', { class: 'btn', title: 'Convertir en seguimiento', onclick: () => segForm(null, { title: cur.title || 'Seguimiento de nota', body: cur.body || '', src: { type: 'note', id: cur.id } }) }, h('span', { svg: I.flag }), 'Seguimiento'),
       ro ? null : h('button', { class: 'btn primary', id: 'note-save', onclick: async e => { e.currentTarget.disabled = true; await saveNote(cur, true); toast('Nota guardada', 'ok'); dr.remove(); render(); } }, 'Guardar'),
       h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: async () => { if (!ro) await saveNote(cur, true); dr.remove(); render(); } })),
     h('div', { class: 'drawer-body' },
@@ -603,7 +682,7 @@ function renderKanban(m) {
         k.is_task ? h('input', { type: 'checkbox', class: 'kchk', checked: !!k.done, disabled: ro, title: k.done ? 'Ejecutada' : 'Marcar como ejecutada', 'aria-label': 'Ejecutada', onclick: e => e.stopPropagation(), onchange: e => setCard(k, { done: e.target.checked }) }) : null,
         h('b', { class: 'ktitle', onclick: () => !ro && cardForm(col, k) }, k.title || 'Sin título'),
         ro ? null : h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones', onclick: e => menu(e.currentTarget, [
-          { label: 'Editar', run: () => cardForm(col, k) },
+          { label: 'Editar', run: () => cardForm(col, k) }, { label: 'Crear seguimiento', run: () => segForm(null, { title: k.title, body: k.body || '', due: k.due, src: { type: 'card', id: k.id } }) },
           { label: k.is_task ? 'Convertir en nota' : 'Convertir en tarea', run: () => setCard(k, { is_task: !k.is_task, done: false }) },
           k.is_task && { label: k.done ? 'Marcar pendiente' : 'Marcar ejecutada', run: () => setCard(k, { done: !k.done }) },
           '-', { label: 'Eliminar', danger: true, run: async () => { if (!await confirmBox('Eliminar', `¿Eliminar "${k.title}"?`)) return; S.kcards = S.kcards.filter(x => x.id !== k.id); render(); await q(sb.from('kcards').delete().eq('id', k.id)); } }]) })),
@@ -1081,7 +1160,7 @@ async function removeProject(p) {
 }
 function rowMenu(anchor, p) {
   menu(anchor, [
-    { label: 'Editar detalles', run: () => openDrawer(p.id, 'details') }, { label: 'Notas del proyecto', run: () => openDrawer(p.id, 'pnotes') }, !p.parent_id && { label: 'Cronograma del proyecto', run: () => openGantt(p) }, { label: 'Abrir comentarios', run: () => openDrawer(p.id, 'comments') }, { label: 'Archivos adjuntos', run: () => openDrawer(p.id, 'files') }, { label: 'Historial de cambios', run: () => openDrawer(p.id, 'history') },
+    { label: 'Editar detalles', run: () => openDrawer(p.id, 'details') }, { label: 'Notas del proyecto', run: () => openDrawer(p.id, 'pnotes') }, canEdit() && { label: 'Crear seguimiento', run: () => segForm(null, { title: 'Seguimiento: ' + (p.data.name || ''), body: '', src: { type: 'project', id: p.id } }) }, !p.parent_id && { label: 'Cronograma del proyecto', run: () => openGantt(p) }, { label: 'Abrir comentarios', run: () => openDrawer(p.id, 'comments') }, { label: 'Archivos adjuntos', run: () => openDrawer(p.id, 'files') }, { label: 'Historial de cambios', run: () => openDrawer(p.id, 'history') },
     canEdit() && '-',
     canEdit() && !p.parent_id && { label: 'Agregar subtarea', run: async () => { const r = await ask('Nueva subtarea', [{ name: 'name', label: 'Nombre', required: true }]); if (r) await createProject({ group_id: p.group_id, parent_id: p.id, data: { name: r.name.trim() } }); } },
     canEdit() && { label: 'Duplicar', run: () => duplicate(p) },
