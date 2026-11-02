@@ -474,6 +474,15 @@ async function ensureQuoteCols() {
   const rows = await q(sb.from('columns').insert(QDEF.map(([key, label, type, width], i) => ({ scope: 'quote', key, label, type, width, position: i + 1, options: [] }))).select());
   S.columns.push(...rows); render();
 }
+function openQuoteFiles(x) {
+  document.querySelector('.drawer')?.remove();
+  const body = h('div', { class: 'drawer-body' });
+  const dr = h('aside', { class: 'drawer', role: 'dialog', 'aria-label': 'Archivos de la cotización' },
+    h('div', { class: 'drawer-head' }, h('div', { style: 'flex:1;min-width:0' }, h('div', { class: 'muted' }, 'Cotización'), h('h3', {}, x.data.name || 'Sin nombre')),
+      h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: () => dr.remove() })), body);
+  document.body.append(dr);
+  drawFiles(x, body, () => { render(); openQuoteFiles(x); });
+}
 function renderQuotes(m) {
   ensureQuoteCols();
   const ro = !canEdit(), qc = cols('quote'), qq = norm(S.qq || '');
@@ -481,18 +490,19 @@ function renderQuotes(m) {
   const addQ = async () => { const [row] = await q(sb.from('quotes').insert({ data: qc.some(c => c.key === 'name') ? { name: 'Nueva cotización' } : {}, position: (S.quotes.length ? Math.max(...S.quotes.map(x => x.position || 0)) : 0) + 1000, author: S.user.id }).select()); S.quotes.push({ ...row, data: row.data || {}, _t: 'quotes' }); render(); };
   const delQ = async x => { if (!await confirmBox('Eliminar línea', `¿Eliminar "${x.data.name || 'esta cotización'}"?`)) return; S.quotes = S.quotes.filter(y => y.id !== x.id); render(); await q(sb.from('quotes').delete().eq('id', x.id)); };
   const dupQ = async x => { const [row] = await q(sb.from('quotes').insert({ data: { ...x.data, name: (x.data.name || '') + ' (copia)' }, position: (x.position || 0) + 1, author: S.user.id }).select()); S.quotes.push({ ...row, data: row.data || {}, _t: 'quotes' }); render(); };
-  const W = 50 + qc.reduce((s, c) => s + c.width, 0) + 44;
+  const W = 96 + qc.reduce((s, c) => s + c.width, 0) + 44;
   const sums = qc.map(c => { if (c.type !== 'money' && c.type !== 'number') return h('td', {}); let t = 0, any = false; list.forEach(x => { const v = num(x.data[c.key]); if (v != null) { t += v; any = true; } }); return h('td', {}, h('div', { class: 'cell ro num' }, any ? (c.type === 'money' ? fmtMoney(t) : t) : '')); });
   const search = h('input', { class: 'input', type: 'search', id: 'qq', placeholder: 'Buscar cotizaciones…', value: S.qq || '', 'aria-label': 'Buscar cotizaciones',
     oninput: e => { S.qq = e.target.value; clearTimeout(search._t); search._t = setTimeout(() => { render(); const i = $('#qq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); } });
   const table = h('table', { class: 'board qtable', style: `width:${W}px` },
-    h('colgroup', {}, h('col', { style: 'width:50px' }), qc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })),
+    h('colgroup', {}, h('col', { style: 'width:96px' }), qc.map(c => h('col', { 'data-colw': c.id, style: `width:${c.width}px` })), h('col', { style: 'width:44px' })),
     h('thead', {}, h('tr', { 'data-scope': 'quote' }, h('th', {}, h('div', { class: 'th-in' }, '#')), qc.map(c => colHeader(c)),
       h('th', { class: 'c-add' }, ro ? null : h('button', { class: 'icon-btn', svg: I.plus, title: 'Agregar columna', 'aria-label': 'Agregar columna', onclick: () => addColumn('quote') })))),
-    h('tbody', { 'data-quotes': '1' }, list.map((x, i) => h('tr', { class: 'qrow', 'data-id': x.id },
+    h('tbody', { 'data-quotes': '1' }, list.map((x, i) => dropTarget(h('tr', { class: 'qrow', 'data-id': x.id },
       h('td', { class: 'qn' }, h('div', { class: 'qnum' }, ro ? null : h('span', { class: 'drag', svg: I.grip, title: 'Arrastrar' }), h('span', {}, i + 1),
-        ro ? null : h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones de la línea', onclick: e => menu(e.currentTarget, [{ label: 'Duplicar línea', run: () => dupQ(x) }, '-', { label: 'Eliminar línea', danger: true, run: () => delQ(x) }]) }))),
-      qc.map(c => h('td', {}, cellView(x, c, true))), h('td', {}, ro ? null : h('button', { class: 'icon-btn', svg: I.x, title: 'Eliminar línea', 'aria-label': 'Eliminar línea', onclick: () => delQ(x) }))))),
+        (() => { const nf = S.attachments.filter(a => a.project_id === x.id).length; return h('button', { class: 'icon-btn badge-btn', 'aria-label': 'Archivos', title: 'Adjuntar y ver archivos', onclick: () => openQuoteFiles(x) }, h('span', { svg: I.clip }), nf ? h('b', {}, nf) : null); })(),
+        ro ? null : h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones de la línea', onclick: e => menu(e.currentTarget, [{ label: 'Archivos adjuntos', run: () => openQuoteFiles(x) }, { label: 'Duplicar línea', run: () => dupQ(x) }, '-', { label: 'Eliminar línea', danger: true, run: () => delQ(x) }]) }))),
+      qc.map(c => h('td', {}, cellView(x, c, true))), h('td', {}, ro ? null : h('button', { class: 'icon-btn', svg: I.x, title: 'Eliminar línea', 'aria-label': 'Eliminar línea', onclick: () => delQ(x) }))), files => upload(x, files, () => openQuoteFiles(x))))),
     h('tfoot', {}, ro ? null : h('tr', { class: 'add-row' }, h('td', { colSpan: qc.length + 2 }, h('button', { class: 'kadd', style: 'margin:0;padding:10px 14px', onclick: addQ }, h('span', { svg: I.plus }), 'Agregar línea'))),
       list.length ? h('tr', { class: 'sum-row' }, h('td', {}, h('div', { class: 'cell ro muted' }, 'Total')), sums, h('td', {})) : null));
   m.replaceChildren(h('div', { class: 'page-head hero' }, h('div', {}, h('h1', {}, 'Cotizaciones'), h('p', {}, 'Haz doble clic en una celda para editar · agrega o elimina líneas y columnas')),
