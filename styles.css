@@ -711,3 +711,27 @@ tr.drop-on td{background:rgba(0,128,232,.1)!important}
 @media (max-width:760px){.chat-fab{bottom:84px;right:16px}.chat-float{bottom:156px;right:16px}}
 .chat-fab.open{font-size:20px;background:var(--g800)}
 #reminders{right:96px}@media (max-width:760px){#reminders{right:16px;bottom:160px}}
+
+.org-card.movable{cursor:grab;touch-action:none;user-select:none}
+.org-src{opacity:.4}
+.org-ghost{position:fixed;z-index:500;pointer-events:none;transform:translate(-50%,-50%) rotate(-3deg) scale(1.03);box-shadow:0 18px 40px rgba(0,0,0,.25);opacity:.95}
+.org-card.drop-on{box-shadow:0 0 0 3px var(--orange),var(--shadow)!important}
+/* Mi oficina en celular */
+@media (max-width:760px){
+  .page-head.hero .seg{width:100%;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
+  .page-head.hero .seg::-webkit-scrollbar{display:none}
+  .page-head.hero .seg button{white-space:nowrap;flex:none}
+  .of-3d{height:56vh;border-radius:14px}
+  .of-label{font-size:10px;padding:3px 7px}.of-label span{display:none}.of-label b{font-size:11px}
+  .of-bubble{font-size:10px;max-width:46vw;overflow:hidden;text-overflow:ellipsis}
+  .toolbar .muted{display:none}
+  .of-elems,.toolbar>div{width:100%}
+  .of-ctl{right:8px;bottom:8px}.of-ctl .btn{padding:8px 12px}
+  .chat-float{left:8px;right:8px!important;width:auto;bottom:150px}
+  .chat-float .chat{height:min(62vh,560px)}
+  .chat-chips{flex-wrap:nowrap;overflow-x:auto}.chat-chips .ktag{flex:none}
+  .of-grid{grid-template-columns:1fr 1fr}.of-card{padding:10px}
+  .org-wrap{padding:6px 0 16px}.org-card{min-width:0;width:min(300px,86vw)}
+  .tk-pop{width:calc(100vw - 32px)}
+  .drawer.of-drawer .drawer-head{flex-wrap:wrap}
+}

@@ -1063,13 +1063,19 @@ function renderOffice0(m) {
     const isUnder = (id, anc) => { let cur = members.find(x => x.id === id), n = 0; while (cur && n++ < 50) { const b = bossOf(cur); if (b === anc) return true; cur = members.find(x => x.id === b); } return false; };
     const setBoss = async (id, boss) => { const x = S.kcols.find(y => y.id === id); if (!x || x.ceo || id === boss || isUnder(boss, id)) return toast('Movimiento no válido en el organigrama', 'err'); x.reports_to = boss; render(); await q(sb.from('kcols').update({ reports_to: boss }).eq('id', id)); toast(`${x.name} ahora reporta a ${S.kcols.find(y => y.id === boss)?.name}`, 'ok'); };
     const node = x => { const st = memberStats(x), kids = members.filter(y => bossOf(y) === x.id);
-      const card = h('div', { class: 'org-card' + (st.late ? ' late' : ''), style: `--c:${x.color}`, draggable: !ro && !x.ceo ? 'true' : null, 'data-id': x.id,
-        ondragstart: e => { e.dataTransfer.setData('text/org', x.id); e.dataTransfer.effectAllowed = 'move'; }, ondragover: e => { if ([...e.dataTransfer.types].includes('text/org')) { e.preventDefault(); card.classList.add('drop-on'); } },
-        ondragleave: () => card.classList.remove('drop-on'), ondrop: e => { e.preventDefault(); card.classList.remove('drop-on'); const id = e.dataTransfer.getData('text/org'); if (id) setBoss(id, x.id); }, onclick: () => openMember(x) },
+      const card = h('div', { class: 'org-card' + (st.late ? ' late' : '') + (!ro && !x.ceo ? ' movable' : ''), style: `--c:${x.color}`, 'data-id': x.id,
+        onpointerdown: e => { if (ro || x.ceo || e.target.closest('select') || e.button > 0) return; const sx = e.clientX, sy = e.clientY; let ghost = null, over = null;
+          const mv = ev => { if (!ghost && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 8) return; ev.preventDefault();
+            if (!ghost) { ghost = card.cloneNode(true); ghost.classList.add('org-ghost'); document.body.append(ghost); card.classList.add('org-src'); }
+            ghost.style.left = ev.clientX + 'px'; ghost.style.top = ev.clientY + 'px'; ghost.hidden = true; const t = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.org-card'); ghost.hidden = false;
+            if (over && over !== t) over.classList.remove('drop-on'); over = t && t !== card ? t : null; over?.classList.add('drop-on'); };
+          const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); if (!ghost) return openMember(x); ghost.remove(); card.classList.remove('org-src'); if (over) { over.classList.remove('drop-on'); setBoss(x.id, over.dataset.id); } };
+          addEventListener('pointermove', mv, { passive: false }); addEventListener('pointerup', up); },
+        onclick: e => { if (ro || x.ceo) openMember(x); } },
         h('div', { class: 'of-avatar', style: `--c:${x.color}` }, h('span', {}, initials(x.name))), h('div', {}, h('b', {}, (x.ceo ? '👑 ' : '') + x.name), h('small', {}, x.role || 'Sin rol'), h('small', { class: 'org-k' }, `${st.pend} pend.` + (st.late ? ` · ${st.late} atras.` : ''))),
         ro || x.ceo ? null : h('select', { class: 'org-sel', 'aria-label': 'Reporta a', onclick: e => e.stopPropagation(), onchange: e => setBoss(x.id, e.target.value) }, members.filter(y => y.id !== x.id).map(y => h('option', { value: y.id, selected: bossOf(x) === y.id }, '↑ ' + y.name))));
       return h('li', {}, card, kids.length ? h('ul', {}, kids.map(node)) : null); };
-    m.append(h('div', { class: 'toolbar' }, actions, h('span', { class: 'muted' }, 'Arrastra una tarjeta sobre otra para cambiar a quién reporta, o usa el selector «↑»')),
+    m.append(h('div', { class: 'toolbar' }, actions, h('span', { class: 'muted' }, 'Arrastra una cajita sobre otra para mover el puesto (también en celular), o usa el selector «↑»')),
       h('div', { class: 'org-wrap' }, ceoM ? h('ul', { class: 'org' }, node(ceoM)) : h('p', { class: 'muted' }, 'Creando tu perfil de CEO…')));
     return;
   }
