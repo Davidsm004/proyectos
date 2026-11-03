@@ -948,6 +948,10 @@ async function supervisorCore(text, ctx) {
     const vi = hit.find(i => isNumCol(d, i)), ci = hit.find(i => i !== vi), type = /pastel|pie|torta/.test(n) ? 'pie' : /dona/.test(n) ? 'doughnut' : /linea|tendencia|evolucion/.test(n) ? 'line' : 'bar';
     setTimeout(() => openCharts(d, { ci, vi: vi ?? (ci == null ? undefined : ''), agg: /promedio/.test(n) ? 'avg' : /cantidad|cuant|contar/.test(n) ? 'count' : 'sum', type }), 50);
     return `Te abrí el gráfico de «${d.name}»` + (ci != null ? ` agrupado por ${d.head[ci]}` : '') + (vi != null ? ` con ${d.head[vi]}` : '') + '. Puedes cambiar columnas y tipo, y descargarlo como imagen.' + ((d.charts || []).length ? ` El archivo traía ${d.charts.length} gráfico(s); también los redibujé.` : ''); }
+  if (dsets.length && !/^(asigna|reasigna|distribuye|reparte|marca|completa)/.test(n)) { const d = dsOf(); const r = !findMember(text) && (/\b(base|registros?|casos?|datos|filas?|export\w*|excel|clientes?)\b/.test(n) || d.head.some(x => norm(x).length > 2 && n.includes(norm(x)))) ? dataQuery(d, text) : null;
+    if (r) { ctx.ds = d.id; const ag = pickWorker({ title: text, body: 'datos ' + d.name }) || sm;
+      if (ag && canEdit()) { const [k] = await q(sb.from('kcards').insert({ title: ('📊 ' + text).slice(0, 200), body: r.text, col_id: ag.id, prio: 'media', done: true, is_task: true, from: 'data', position: nextPos(cardsOf(ag.id)), author: S.user.id }).select()); S.kcards.push(k); }
+      return (ag && ag.id !== sm?.id ? `Se lo pedí a ${ag.name} (${ag.role || 'equipo'}), revisó la base y este es el resultado:\n` : '') + r.text; } }
   if (/\b(base|datos|columna|filas?)\b/.test(n) && dsets.length) { const d = dsOf(); ctx.ds = d.id; const H = d.head.map(x => norm(x));
     const col = H.findIndex(hh => hh && n.includes(hh));
     if (/cuantas filas|cuantos registros|tamano/.test(n)) return `${d.name} tiene ${d.rows} filas.`;
@@ -962,7 +966,7 @@ async function supervisorCore(text, ctx) {
       const toIns = recs.map(({ _who, ...x }) => x), ins = await q(sb.from('kcards').insert(toIns).select()); S.kcards.push(...ins);
       const pendSv = ins.filter(k => k.col_id === sv.id), dist = sm ? await distribute(pendSv, true) : [];
       return `Creé ${ins.length} tarea(s) desde ${d.name}` + (dist.length ? ` y repartí ${dist.length} sin responsable según la carga.` : '.') + ' Puedes verlas en la ficha de cada persona.'; }
-    return `Estoy usando la base «${d.name}» (${d.rows} filas). Puedes pedirme: «¿cuántas filas tiene?», «¿qué columnas tiene?», «suma la columna Monto», «busca Esteban en la base» o «crea tareas de la base con Pendiente».`; }
+    return `Estoy usando la base «${d.name}» (${d.rows} filas). Puedes pedirme: «¿cuántos registros hay por SKILL?», «cuántos casos PENDIENTE hay este mes», «top 10 por TIPO», «lista los de ESTADO Cerrado», «exporta los de enero a Excel», «busca Esteban en la base» o «crea tareas de la base con Pendiente».`; }
   const fmtK = k => `• ${k.title}` + (k.due ? ` (vence ${new Date(k.due + 'T00:00').toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })})` : '');
   if (!ws.length) return 'Aún no hay personal en la oficina. Agrega integrantes en «Equipo y tareas» y yo me encargo de repartir el trabajo.';
   if (/^(hola|buen(os|as)|hey)/.test(n) && n.length < 25) return `¡Hola! Soy ${sm?.name || 'tu supervisor'}. Puedo asignar, repartir, reasignar y darte el estado del equipo. Escribe «ayuda» para ver ejemplos.`;
@@ -1085,6 +1089,44 @@ function openCharts(d, pre = {}) {
     h('h4', {}, '📊 Crear gráfico con los datos'), h('div', { class: 'form-grid' }, h('div', { class: 'field' }, h('label', {}, 'Agrupar por'), sC), h('div', { class: 'field' }, h('label', {}, 'Valor'), sV), h('div', { class: 'field' }, h('label', {}, 'Cálculo'), sA), h('div', { class: 'field' }, h('label', {}, 'Tipo'), sT)), box, sum);
   modal('Gráficos · ' + d.name, body, [{ label: '⬇ Descargar imagen', cls: 'primary', run: () => { const l = h('a', { href: cv.toDataURL('image/png'), download: d.name.replace(/\.[^.]+$/, '') + '_grafico.png' }); document.body.append(l); l.click(); l.remove(); } }], true);
   setTimeout(go, 30);
+}
+/* consultas sobre las bases: filtros por valor/columna, periodos, agrupar, top, sumas y exportar */
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+function parseD(s) { s = String(s || '').trim(); let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return new Date(+m[1], m[2] - 1, +m[3]); m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/); if (m) return new Date(m[3].length === 2 ? 2000 + +m[3] : +m[3], m[2] - 1, +m[1]); return null; }
+function dataQuery(d, text) {
+  const n = norm(text), H = d.head.map(x => norm(x)), rows0 = d.data, desc = [];
+  const colIn = s => { let best = -1; H.forEach((x, i) => { if (x && s.includes(x) && (best < 0 || x.length > H[best].length)) best = i; }); return best; };
+  let rows = rows0, by = -1, sumc = -1, top = 0, used = new Set();
+  const pm = n.match(/\bpor\s+(.+?)(?=\s+(?:de|del|en|con|donde|que|y|para|top)\b|$)/); if (pm) { by = colIn(pm[1]); if (by >= 0) used.add(by); }
+  const sm = n.match(/\b(suma|total|promedio|monto)\s+(?:de\s+)?(?:la\s+columna\s+)?(.+?)(?=\s+(?:por|de|en|con|donde)\b|$)/); if (sm) { const c = colIn(sm[2]); if (c >= 0 && isNumCol(d, c)) { sumc = c; used.add(c); } }
+  const tm = n.match(/\btop\s*(\d+)|\b(\d+)\s+(?:primer|mayor|principal)/); if (tm) top = +(tm[1] || tm[2]);
+  // filtros explícitos: COLUMNA es/= VALOR, COLUMNA contiene VALOR
+  H.forEach((x, i) => { if (!x) return; const re = new RegExp(x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(?:=|:|es|sea|igual a|contiene|con)\\s+([^,;]+?)(?=\\s+(?:y|por|en|de la base|top)\\b|[,;]|$)'); const m = n.match(re); if (m && i !== by) { const v = m[1].trim(); rows = rows.filter(r => norm(r[i]).includes(v)); used.add(i); desc.push(`${d.head[i]} contiene «${v}»`); } });
+  // filtros por valor mencionado (ej. "casos PENDIENTE", "skill Ventas")
+  H.forEach((x, i) => { if (used.has(i)) return; const vals = [...new Set(rows0.map(r => norm(r[i])).filter(v => v.length >= 3 && !/^\d+([.,]\d+)?$/.test(v)))]; if (vals.length > 300) return;
+    const hit = vals.filter(v => new RegExp('(^|[^a-z0-9ñ])' + v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z0-9ñ])').test(n) && !H.includes(v)).sort((a, b) => b.length - a.length)[0];
+    if (hit) { rows = rows.filter(r => norm(r[i]) === hit); used.add(i); desc.push(`${d.head[i]} = ${rows0.find(r => norm(r[i]) === hit)[i]}`); } });
+  // periodo sobre la primera columna de fecha
+  const dc = H.findIndex((x, i) => /fecha|creado|date/.test(x) && rows0.slice(0, 20).some(r => parseD(r[i]))); let per = null;
+  if (dc >= 0) { const t = new Date(); t.setHours(0, 0, 0, 0); const mi = MESES.findIndex(m => n.includes(m)), yr = +(n.match(/\b(20\d\d)\b/) || [])[1] || t.getFullYear();
+    if (/\bhoy\b/.test(n)) per = [t, new Date(+t + DAY), 'hoy']; else if (/\bayer\b/.test(n)) per = [new Date(t - DAY), t, 'ayer'];
+    else if (/esta semana/.test(n)) { const s = new Date(t - ((t.getDay() + 6) % 7) * DAY); per = [s, new Date(+s + 7 * DAY), 'esta semana']; }
+    else if (/este mes/.test(n)) per = [new Date(t.getFullYear(), t.getMonth(), 1), new Date(t.getFullYear(), t.getMonth() + 1, 1), 'este mes'];
+    else if (/mes pasado/.test(n)) per = [new Date(t.getFullYear(), t.getMonth() - 1, 1), new Date(t.getFullYear(), t.getMonth(), 1), 'el mes pasado'];
+    else if (mi >= 0) per = [new Date(yr, mi, 1), new Date(yr, mi + 1, 1), MESES[mi] + ' ' + yr];
+    if (per) { rows = rows.filter(r => { const x = parseD(r[dc]); return x && x >= per[0] && x < per[1]; }); desc.push(`${d.head[dc]} en ${per[2]}`); } }
+  const wantList = /\b(lista|listado|muestra|muestrame|cuales son|detalle|ver)\b/.test(n), wantX = /export|descarg|excel|archivo/.test(n), wantDistinct = /\b(valores|distintos|unicos|opciones)\b/.test(n);
+  if (!desc.length && by < 0 && sumc < 0 && !top && !wantX && !wantDistinct && !/\b(cuant|total|filtra|agrupa)/.test(n)) return null;
+  const fl = desc.length ? ` con ${desc.join(', ')}` : '', lines = [];
+  let out = `En «${d.name}» hay ${rows.length.toLocaleString('es-CR')} registro(s)${fl}.`;
+  if (sumc >= 0) { const v = rows.map(r => num(r[sumc])).filter(x => x != null && !isNaN(x)), s = v.reduce((a, b) => a + b, 0); out += ` ${/promedio/.test(n) ? 'Promedio' : 'Total'} de ${d.head[sumc]}: ${(/promedio/.test(n) ? s / (v.length || 1) : s).toLocaleString('es-CR', { maximumFractionDigits: 2 })}.`; }
+  if (wantDistinct && by < 0) { const c = colIn(n.replace(/valores|distintos|unicos|opciones/g, '')); if (c >= 0) by = c; }
+  if (by >= 0) { const m = new Map(); rows.forEach(r => { const k = String(r[by] ?? '').trim() || '(vacío)', o = m.get(k) || { n: 0, s: 0 }; o.n++; if (sumc >= 0) o.s += num(r[sumc]) || 0; m.set(k, o); });
+    const e = [...m].sort((a, b) => (sumc >= 0 ? b[1].s - a[1].s : b[1].n - a[1].n)); out += `\nPor ${d.head[by]} (${e.length}):`;
+    e.slice(0, top || 15).forEach(([k, o]) => lines.push(`• ${k}: ${o.n.toLocaleString('es-CR')}` + (sumc >= 0 ? ` · ${o.s.toLocaleString('es-CR', { maximumFractionDigits: 2 })}` : '') + ` (${Math.round(o.n / rows.length * 100)}%)`)); if (e.length > (top || 15)) lines.push(`…y ${e.length - (top || 15)} más.`); }
+  else if (wantList || top) { const sh = d.head.map((_, i) => i).filter(i => rows.some(r => String(r[i] ?? '').trim())).slice(0, 5); rows.slice(0, top || 10).forEach(r => lines.push('• ' + sh.map(i => r[i]).filter(x => String(x).trim()).join(' · '))); if (rows.length > (top || 10)) lines.push(`…y ${rows.length - (top || 10)} más (pídeme «exporta» para el Excel).`); }
+  if (wantX && rows.length) loadLib('lib/xlsx.full.min.js?v=1', 'XLSX').then(() => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([d.head, ...rows]), 'Datos'); XLSX.writeFile(wb, d.name.replace(/\.[^.]+$/, '') + '_filtrado.xlsx'); }).catch(e => toast(e.message, 'err'));
+  return { text: out + (lines.length ? '\n' + lines.join('\n') : '') + (wantX && rows.length ? `\n📥 Descargando Excel con ${rows.length} registro(s).` : '') + (d.data.length < d.rows ? `\n(Analizado sobre las primeras ${d.data.length} filas guardadas.)` : ''), count: rows.length };
 }
 function guessCol(head, words) { const i = head.findIndex(x => words.some(w => norm(x).includes(w))); return i < 0 ? '' : String(i); }
 async function dataCenter(m) {
