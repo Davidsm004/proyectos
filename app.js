@@ -31,6 +31,7 @@ const I = {
   list: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4h12M2 8h12M2 12h12"/></svg>',
   book: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 2.5h7.5A2.5 2.5 0 0113 5v8.5H5.5A2.5 2.5 0 013 11z"/><path d="M3 11a2 2 0 012-2h8"/></svg>',
   cal: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M5 1.5v3M11 1.5v3M5 9.5h4M5 11.5h6"/></svg>',
+  office: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 14V4l6-2.5L14 4v10M2 14h12M5 6.5h1.5M9.5 6.5H11M5 9.5h1.5M9.5 9.5H11M7 14v-2.5h2V14"/></svg>',
   money: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="4" width="13" height="8" rx="1.5"/><circle cx="8" cy="8" r="2"/></svg>',
   flag: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 14V2.5M3 3h8l-1.5 3L11 9H3"/></svg>',
   moon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13.5 9.5A5.5 5.5 0 016.5 2.5a5.5 5.5 0 107 7z"/></svg>',
@@ -204,11 +205,11 @@ async function enter(user) {
   if (!S.projects.length && canEdit()) { S.view = 'new'; renderShell(); toast('Importa tu Excel de proyectos para comenzar', 'ok'); }
 }
 async function loadAll() {
-  const [g, c, p, cm, at, st, nt, kc, kd, sg, qt] = await Promise.all([
+  const [g, c, p, cm, at, st, nt, kc, kd, sg, qt, dsx] = await Promise.all([
     q(sb.from('groups').select('*').order('position')), q(sb.from('columns').select('*').order('position')),
     q(sb.from('projects').select('*').order('position')), q(sb.from('comments').select('*').order('created_at', { ascending: false })),
-    q(sb.from('attachments').select('*').order('created_at', { ascending: false })), q(sb.from('settings').select('*')), q(sb.from('notes').select('*')), q(sb.from('kcols').select('*')), q(sb.from('kcards').select('*')), q(sb.from('segs').select('*')), q(sb.from('quotes').select('*'))]);
-  Object.assign(S, { groups: g, columns: c, projects: p.map(x => ({ ...x, data: x.data || {} })), comments: cm, attachments: at, settings: Object.fromEntries(st.map(s => [s.key, s.value])), notes: nt || [], kcols: kc || [], kcards: kd || [], segs: sg || [], quotes: (qt || []).map(x => ({ ...x, data: x.data || {}, _t: 'quotes' })) });
+    q(sb.from('attachments').select('*').order('created_at', { ascending: false })), q(sb.from('settings').select('*')), q(sb.from('notes').select('*')), q(sb.from('kcols').select('*')), q(sb.from('kcards').select('*')), q(sb.from('segs').select('*')), q(sb.from('quotes').select('*')), q(sb.from('datasets').select('*'))]);
+  Object.assign(S, { groups: g, columns: c, projects: p.map(x => ({ ...x, data: x.data || {} })), comments: cm, attachments: at, settings: Object.fromEntries(st.map(s => [s.key, s.value])), notes: nt || [], kcols: kc || [], kcards: kd || [], segs: sg || [], quotes: (qt || []).map(x => ({ ...x, data: x.data || {}, _t: 'quotes' })), datasets: dsx || [] });
 }
 function subscribe() {
   if (!sb.channel) return;
@@ -229,7 +230,8 @@ function renderShell() {
         h('button', { id: 'nav-board', class: S.view === 'board' ? 'on' : '', onclick: () => go('board') }, h('span', { svg: I.list }), 'Ver proyectos'),
         h('button', { id: 'nav-diary', class: S.view === 'diary' ? 'on' : '', onclick: () => go('diary') }, h('span', { svg: I.book }), 'Mis notas'),
         h('button', { id: 'nav-follow', class: S.view === 'follow' ? 'on' : '', onclick: () => go('follow') }, h('span', { svg: I.flag }), 'Mis seguimientos'),
-        h('button', { id: 'nav-quotes', class: S.view === 'quotes' ? 'on' : '', onclick: () => go('quotes') }, h('span', { svg: I.money }), 'Cotizaciones')),
+        h('button', { id: 'nav-quotes', class: S.view === 'quotes' ? 'on' : '', onclick: () => go('quotes') }, h('span', { svg: I.money }), 'Cotizaciones'),
+        h('button', { id: 'nav-office', class: S.view === 'office' ? 'on' : '', onclick: () => go('office') }, h('span', { svg: I.office }), 'Mi oficina')),
       h('div', { class: 'right' }, h('button', { class: 'icon-btn bell', id: 'theme-btn', 'aria-label': 'Modo noche', title: 'Modo noche / día', onclick: toggleTheme }, h('span', { svg: document.documentElement.dataset.theme === 'dark' ? I.sun : I.moon })), h('button', { class: 'icon-btn bell', id: 'bell', 'aria-label': 'Notificaciones', title: 'Notificaciones', onclick: e => notifPanel(e.currentTarget) }, h('span', { svg: I.bell }), h('b', { id: 'bell-n', class: 'hidden' })), h('button', { class: 'role-chip lock-chip', title: 'Bloquear pantalla', 'aria-label': 'Bloquear pantalla', onclick: lockScreen }, h('span', { svg: I.lock }), p.role),
         h('button', { class: 'icon-btn', style: 'width:auto;height:auto', title: p.email, 'aria-label': 'Cuenta', onclick: e => menu(e.currentTarget, [
           { label: p.email, run: () => {} }, { label: '🔒 Bloquear pantalla', run: lockScreen }, { label: '🔔 Probar recordatorio', run: testReminder }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
@@ -248,6 +250,7 @@ function render() {
   if (S.view === 'diary') return renderDiary(m);
   if (S.view === 'follow') return renderFollow(m);
   if (S.view === 'quotes') return renderQuotes(m);
+  if (S.view === 'office') return renderOffice(m);
   const keep = {}; m.querySelectorAll('[data-scroll]').forEach(el => keep[el.dataset.scroll] = el.scrollLeft);
   renderBoard(m);
   m.querySelectorAll('[data-scroll]').forEach(el => { if (keep[el.dataset.scroll]) el.scrollLeft = keep[el.dataset.scroll]; });
@@ -326,7 +329,7 @@ document.addEventListener('paste', e => {
   else applyGrid(el, matrix);
 });
 document.addEventListener('keydown', e => {
-  if (document.getElementById('lockscreen') || S.view === 'diary' || S.view === 'quotes') return;
+  if (document.getElementById('lockscreen') || S.view === 'diary' || S.view === 'quotes' || S.view === 'office') return;
   const mod = e.ctrlKey || e.metaKey;
   if (mod && !editing() && !document.querySelector('.overlay') && (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y') && canEdit()) { e.preventDefault(); undoRedo(e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z')); return; }
   if (editing() || mod || e.altKey || document.querySelector('.overlay') || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.defaultPrevented) return;
@@ -514,6 +517,266 @@ function renderQuotes(m) {
     const ups = [...m.querySelectorAll('tr.qrow')].map((tr, i) => { const x = S.quotes.find(y => y.id === tr.dataset.id); x.position = (i + 1) * 1000; return q(sb.from('quotes').update({ position: x.position }).eq('id', x.id)); });
     render(); await Promise.all(ups); } });
   Sortable.create(m.querySelector('thead tr'), { draggable: 'th.dcol', filter: 'button,.rz', preventOnFilter: false, animation: 150, onEnd: e => { if (e.oldIndex !== e.newIndex) saveColOrder([...e.to.querySelectorAll('th.dcol')].map(th => S.columns.find(c => c.id === th.dataset.col)).filter(Boolean)); } });
+}
+
+/* ---------- Mi oficina: oficina 3D, equipo con roles (CEO), tareas y Centro de datos ---------- */
+const ROLES_SUG = ['CEO', 'Gerente de proyectos', 'PMO', 'Analista de datos', 'Desarrollador', 'Diseñador UX/UI', 'QA / Pruebas', 'Líder técnico', 'Analista de negocio', 'Soporte', 'Comercial'];
+const team = () => myCols().slice().sort((a, b) => (b.ceo ? 1 : 0) - (a.ceo ? 1 : 0) || byPos(a, b));
+async function ensureCEO() {
+  if (!canEdit() || S._ceoChecked) return; S._ceoChecked = true;
+  if (myCols().some(c => c.ceo)) return;
+  const name = (S.profile.email || 'Yo').replace(/\d+$/, '') || 'Yo';
+  const ex = myCols().find(c => norm(c.name) === norm(name) || norm(c.name) === 'david' || norm(c.name).startsWith('david solis'));
+  if (ex) { Object.assign(ex, { ceo: true, role: 'CEO' }); await q(sb.from('kcols').update({ ceo: true, role: 'CEO' }).eq('id', ex.id)); }
+  else { const [row] = await q(sb.from('kcols').insert({ name: 'David Solis', role: 'CEO', ceo: true, color: '#ED7F32', position: 0, author: S.user.id }).select()); S.kcols.push(row); }
+  render();
+}
+async function memberForm(c) {
+  const r = await ask(c ? 'Editar integrante' : 'Nuevo integrante', [
+    { name: 'name', label: 'Nombre', value: c?.name || '', required: true },
+    { name: 'role', label: 'Rol de trabajo', value: c?.role || '', placeholder: 'Ej.: Analista de datos' },
+    { name: 'traits', label: 'Personalidad (rasgos separados por coma)', value: (c?.traits || []).join(', '), placeholder: 'Analítico, creativo, detallista' },
+    { name: 'strengths', label: 'Fortalezas / cómo trabaja mejor', type: 'textarea', value: c?.strengths || '' },
+    { name: 'quote', label: 'Frase que lo representa', value: c?.quote || '' },
+    { name: 'color', label: 'Color (túnica / ropa)', type: 'color', value: c?.color || PALETTE[myCols().length % PALETTE.length] },
+    { name: 'hair', label: 'Cabello', type: 'select', value: c?.hair || 'short', options: [{ value: 'short', label: 'Corto' }, { value: 'long', label: 'Largo' }, { value: 'cap', label: 'Gorra' }, { value: 'wizard', label: 'Sombrero de mago' }, { value: 'none', label: 'Sin cabello' }] }], c ? 'Guardar' : 'Agregar');
+  if (!r) return;
+  const v = { name: r.name.trim(), role: r.role.trim() || (c?.ceo ? 'CEO' : 'Sin rol'), traits: r.traits.split(',').map(s => s.trim()).filter(Boolean), strengths: r.strengths.trim(), quote: r.quote.trim(), color: r.color, hair: r.hair };
+  if (c) { Object.assign(c, v); render(); await q(sb.from('kcols').update(v).eq('id', c.id)); toast('Integrante actualizado', 'ok'); }
+  else { const [row] = await q(sb.from('kcols').insert({ ...v, position: nextPos(myCols()), author: S.user.id }).select()); S.kcols.push(row); render(); toast('Integrante agregado a la oficina', 'ok'); }
+}
+async function taskForm(c, k) {
+  const r = await ask(k ? 'Editar tarea' : 'Asignar tarea a ' + c.name, [
+    { name: 'title', label: 'Tarea', value: k?.title || '', required: true }, { name: 'body', label: 'Detalle', type: 'textarea', value: k?.body || '' },
+    { name: 'who', label: 'Responsable', type: 'select', value: k?.col_id || c.id, options: team().map(m => ({ value: m.id, label: `${m.name} · ${m.role || 'Sin rol'}` })) },
+    { name: 'due', label: 'Fecha límite', type: 'date', value: k?.due || '' },
+    { name: 'prio', label: 'Prioridad', type: 'select', value: k?.prio || 'media', options: [{ value: 'alta', label: 'Alta' }, { value: 'media', label: 'Media' }, { value: 'baja', label: 'Baja' }] },
+    { name: 'done', label: 'Estado', type: 'select', value: k?.done ? 'yes' : 'no', options: [{ value: 'no', label: 'Pendiente' }, { value: 'yes', label: 'Hecha' }] }], k ? 'Guardar' : 'Asignar');
+  if (!r) return;
+  const v = { title: r.title.trim(), body: r.body.trim(), col_id: r.who, due: r.due || null, prio: r.prio, done: r.done === 'yes', is_task: true };
+  if (k) { Object.assign(k, v); render(); await q(sb.from('kcards').update(v).eq('id', k.id)); }
+  else { const [row] = await q(sb.from('kcards').insert({ ...v, position: nextPos(cardsOf(r.who)), author: S.user.id, from: 'office' }).select()); S.kcards.push(row); render(); toast('Tarea asignada', 'ok'); }
+  if (S.omember) openMember(S.kcols.find(x => x.id === S.omember));
+}
+function memberStats(c) { const ks = cardsOf(c.id).filter(k => k.is_task), today = new Date(new Date().toDateString());
+  return { pend: ks.filter(k => !k.done).length, done: ks.filter(k => k.done).length, late: ks.filter(k => !k.done && k.due && dOf(k.due) < today).length, total: ks.length }; }
+function openMember(c) {
+  if (!c) return; S.omember = c.id; document.querySelector('.drawer')?.remove();
+  const ro = !canEdit(), st = memberStats(c), ks = cardsOf(c.id).filter(k => k.is_task).sort((a, b) => (a.done - b.done) || String(a.due || '9').localeCompare(String(b.due || '9')));
+  const today = new Date(new Date().toDateString()), PR = { alta: '🔴 Alta', media: '🟠 Media', baja: '🟢 Baja' };
+  const dr = h('aside', { class: 'drawer of-drawer', role: 'dialog', 'aria-label': 'Integrante' },
+    h('div', { class: 'drawer-head', style: `border-top:6px solid ${c.color}` }, h('div', { class: 'of-avatar', style: `--c:${c.color}` }, h('span', {}, initials(c.name))),
+      h('div', { style: 'flex:1;min-width:0' }, h('h3', {}, c.name, c.ceo ? h('span', { class: 'of-ceo' }, '👑 CEO') : null), h('div', { class: 'muted' }, c.role || 'Sin rol')),
+      ro ? null : h('button', { class: 'btn', onclick: () => memberForm(c).then(() => openMember(S.kcols.find(x => x.id === c.id))) }, 'Editar'),
+      h('button', { class: 'icon-btn', svg: I.x, 'aria-label': 'Cerrar', onclick: () => { S.omember = null; dr.remove(); } })),
+    h('div', { class: 'drawer-body' },
+      c.quote ? h('blockquote', { class: 'fu-quote' }, h('p', {}, '“' + c.quote + '”')) : null,
+      (c.traits || []).length ? h('div', { class: 'of-traits' }, c.traits.map(t => h('span', { class: 'tag', style: `--tc:${c.color}` }, t))) : null,
+      c.strengths ? h('p', { class: 'muted', style: 'white-space:pre-wrap' }, c.strengths) : null,
+      h('div', { class: 'of-stats' }, h('div', {}, h('b', {}, st.pend), 'pendientes'), h('div', { class: st.late ? 'late' : '' }, h('b', {}, st.late), 'atrasadas'), h('div', {}, h('b', {}, st.done), 'hechas')),
+      h('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px' }, h('h3', { class: 'note-h', style: 'margin:0' }, 'Tareas'), ro ? null : h('button', { class: 'btn primary', onclick: () => taskForm(c) }, h('span', { svg: I.plus }), 'Asignar tarea')),
+      ks.length ? ks.map(k => { const late = !k.done && k.due && dOf(k.due) < today;
+        return h('div', { class: 'pn' + (k.done ? ' done' : ''), style: `--pc:${c.color}` },
+          h('input', { type: 'checkbox', class: 'kchk', checked: !!k.done, disabled: ro, 'aria-label': 'Hecha', onchange: async e => { await setCard(k, { done: e.target.checked }); openMember(c); } }),
+          h('div', { class: 'pn-main' }, h('b', { style: 'cursor:pointer', onclick: () => !ro && taskForm(c, k) }, k.title), k.body ? h('p', {}, k.body) : null,
+            h('div', { class: 'kfoot' }, k.prio ? h('span', { class: 'ktag' }, PR[k.prio]) : null, k.due ? h('span', { class: 'kdue' + (late ? ' late' : '') }, new Date(k.due + 'T00:00').toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })) : null,
+              k.from === 'data' ? h('span', { class: 'ktag' }, '🗄 Centro de datos') : null), commentsBlock(k.id, () => { render(); openMember(c); })),
+          ro ? null : h('button', { class: 'icon-btn', svg: I.dots, 'aria-label': 'Opciones', onclick: e => menu(e.currentTarget, [{ label: 'Editar / reasignar', run: () => taskForm(c, k) }, { label: 'Crear seguimiento', run: () => segForm(null, { title: k.title, body: k.body || '', due: k.due, src: { type: 'card', id: k.id } }) },
+            '-', { label: 'Eliminar', danger: true, run: async () => { if (!await confirmBox('Eliminar tarea', `¿Eliminar "${k.title}"?`)) return; S.kcards = S.kcards.filter(x => x.id !== k.id); render(); openMember(c); await q(sb.from('kcards').delete().eq('id', k.id)); } }]) }));
+      }) : h('p', { class: 'muted' }, 'Sin tareas asignadas.'),
+      ro || c.ceo ? null : h('div', { style: 'margin-top:18px;text-align:right' }, h('button', { class: 'btn danger', onclick: async () => { if (!await confirmBox('Quitar de la oficina', `¿Quitar a "${c.name}" y sus tareas?`)) return;
+        const ks2 = cardsOf(c.id); S.kcards = S.kcards.filter(k => k.col_id !== c.id); S.kcols = S.kcols.filter(x => x.id !== c.id); dr.remove(); render(); for (const k of ks2) await q(sb.from('kcards').delete().eq('id', k.id)); await q(sb.from('kcols').delete().eq('id', c.id)); } }, 'Quitar de la oficina'))));
+  document.body.append(dr);
+}
+
+/* --- escena 3D (Three.js local, sin CDN) --- */
+let OF = null;
+function office3D(wrap, members) {
+  const T = window.THREE; if (!T) return;
+  if (OF) { OF.dispose(); OF = null; }
+  const W = wrap.clientWidth || 800, H = wrap.clientHeight || 480, dark = document.documentElement.dataset.theme === 'dark';
+  const renderer = new T.WebGLRenderer({ antialias: true, alpha: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(W, H);
+  const mobile = innerWidth < 760; renderer.shadowMap.enabled = !mobile; renderer.shadowMap.type = T.PCFSoftShadowMap;
+  wrap.append(renderer.domElement);
+  const scene = new T.Scene();
+  const cols = 4, rows = Math.max(2, Math.ceil((members.length - 1) / cols)), FW = 28, FD = 14 + rows * 5.5;
+  let zoom = mobile ? 0.8 : 1.45, theta = Math.PI / 4, phi = 0.62; const target = new T.Vector3(0, 0, 0);
+  const cam = new T.OrthographicCamera(-1, 1, 1, -1, -200, 400);
+  const setCam = () => { const a = (wrap.clientWidth || W) / (wrap.clientHeight || H), s = 17 / zoom; cam.left = -s * a; cam.right = s * a; cam.top = s; cam.bottom = -s; cam.updateProjectionMatrix();
+    cam.position.set(target.x + Math.sin(theta) * Math.cos(phi) * 60, target.y + Math.sin(phi) * 60, target.z + Math.cos(theta) * Math.cos(phi) * 60); cam.lookAt(target); };
+  scene.add(new T.HemisphereLight(0xffffff, dark ? 0x223 : 0xbfc8dd, dark ? 0.45 : 0.9));
+  const sun = new T.DirectionalLight(0xffffff, dark ? 0.35 : 0.85); sun.position.set(-20, 40, 25); sun.castShadow = !mobile; sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40 }); scene.add(sun);
+  const M = c => new T.MeshStandardMaterial({ color: c, roughness: 0.55 }), box = (w, hh, d, c, x, y, z, parent = scene) => { const m = new T.Mesh(new T.BoxGeometry(w, hh, d), typeof c === 'object' ? c : M(c)); m.position.set(x, y, z); m.castShadow = m.receiveShadow = !mobile; parent.add(m); return m; };
+  const cyl = (r, hh, c, x, y, z, parent = scene, seg = 16) => { const m = new T.Mesh(new T.CylinderGeometry(r, r, hh, seg), typeof c === 'object' ? c : M(c)); m.position.set(x, y, z); m.castShadow = !mobile; parent.add(m); return m; };
+  // base tipo maqueta + piso con "puntitos"
+  box(FW + 1, 1.2, FD + 1, dark ? 0x1b2133 : 0x2f333c, 0, -0.65, 0);
+  box(FW, 0.3, FD, dark ? 0x5a4632 : 0xc89b6d, 0, 0.1, 0);
+  const studG = new T.CylinderGeometry(0.18, 0.18, 0.12, 10), studs = new T.InstancedMesh(studG, M(dark ? 0x5f4a35 : 0xcfa477), Math.ceil(FW / 2) * Math.ceil(FD / 2)); let si = 0; const dm = new T.Matrix4();
+  for (let x = -FW / 2 + 1; x < FW / 2; x += 2) for (let z = -FD / 2 + 1; z < FD / 2; z += 2) { dm.setPosition(x, 0.31, z); studs.setMatrixAt(si++, dm); } studs.count = si; scene.add(studs);
+  // paredes cortadas (fondo e izquierda) con ventanas
+  const wallC = dark ? 0x2a3044 : 0xeeedf2; box(FW, 7, 0.4, wallC, 0, 3.6, -FD / 2); box(0.4, 7, FD, wallC, -FW / 2, 3.6, 0);
+  const glass = new T.MeshStandardMaterial({ color: 0x9fd8ff, transparent: true, opacity: dark ? 0.25 : 0.35, roughness: 0.1 });
+  for (let z = -FD / 2 + 3; z < FD / 2 - 2; z += 4.5) box(0.45, 3.2, 3, glass, -FW / 2, 4, z);
+  for (let x = -FW / 2 + 3; x < -2; x += 4.5) box(3, 3.2, 0.45, glass, x, 4, -FD / 2);
+  // logo Liberty en la pared
+  new T.TextureLoader().load('logo.png', tx => { const p = new T.Mesh(new T.PlaneGeometry(6, 6 * 85 / 527), new T.MeshBasicMaterial({ map: tx, transparent: true })); p.position.set(4.5, 5.4, -FD / 2 + 0.22); scene.add(p); });
+  box(8, 0.12, 0.3, 0xed7f32, 4.5, 4.3, -FD / 2 + 0.25);
+  // pizarra (seguimientos) y pantalla grande (pipeline) con texto dibujado
+  const canvasTex = (w, hh, draw) => { const cv = document.createElement('canvas'); cv.width = w; cv.height = hh; draw(cv.getContext('2d')); const t = new T.CanvasTexture(cv); t.anisotropy = 4; return t; };
+  const segP = S.segs.filter(s => s.author === S.user.id && s.status !== 'done'), segL = segP.filter(s => segState(s) === 'late').length;
+  const wb = new T.Mesh(new T.PlaneGeometry(5, 3), new T.MeshBasicMaterial({ map: canvasTex(500, 300, g => { g.fillStyle = '#fff'; g.fillRect(0, 0, 500, 300); g.fillStyle = '#0080E8'; g.font = 'bold 34px Montserrat,sans-serif'; g.fillText('Seguimientos', 24, 52);
+    g.fillStyle = '#2F333C'; g.font = '26px Montserrat,sans-serif'; g.fillText(`${segP.length} pendientes`, 24, 110); g.fillStyle = segL ? '#B3261E' : '#3F886B'; g.fillText(`${segL} atrasados`, 24, 150);
+    segP.slice(0, 3).forEach((s, i) => { g.fillStyle = '#6A6D76'; g.font = '20px Montserrat,sans-serif'; g.fillText('• ' + s.title.slice(0, 32), 24, 200 + i * 30); }); }) }));
+  wb.position.set(-FW / 2 + 0.25, 4, -FD / 2 + 8.5); wb.rotation.y = Math.PI / 2; wb.userData.go = 'follow'; scene.add(wb);
+  const tt = totals(S.projects.filter(p => !p.parent_id));
+  const tv = new T.Mesh(new T.PlaneGeometry(4.4, 2.5), new T.MeshBasicMaterial({ map: canvasTex(440, 250, g => { const gr = g.createLinearGradient(0, 0, 440, 250); gr.addColorStop(0, '#0080E8'); gr.addColorStop(1, '#003FF9'); g.fillStyle = gr; g.fillRect(0, 0, 440, 250);
+    g.fillStyle = '#fff'; g.font = 'bold 26px Montserrat,sans-serif'; g.fillText('Pipeline', 20, 42); g.font = '22px Montserrat,sans-serif'; g.fillText('Retorno ' + fmtMoney(tt.ret), 20, 95); g.fillText('Costo ' + fmtMoney(tt.cost), 20, 135); g.fillText('Avance ' + Math.round(tt.prog) + '%', 20, 175);
+    g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(20, 200, 400, 14); g.fillStyle = '#ED7F32'; g.fillRect(20, 200, 4 * tt.prog, 14); }) }));
+  tv.position.set(10.2, 4.6, -FD / 2 + 0.25); tv.userData.go = 'board'; scene.add(tv); box(4.7, 2.8, 0.15, 0x111111, 10.2, 4.6, -FD / 2 + 0.15);
+  // sala de reuniones de vidrio (Proyectos) y oficina del CEO
+  const room = (x, z, w, d, label, go) => { const g = new T.Group(); [[w, 0.2, x, z - d / 2], [w, 0.2, x, z + d / 2]].forEach(([ww, , xx, zz]) => box(ww, 3, 0.12, glass, xx, 1.8, zz, g)); [[x - w / 2], [x + w / 2]].forEach(([xx]) => box(0.12, 3, d, glass, xx, 1.8, z, g));
+    box(w, 0.08, 0.14, 0x84858a, x, 3.3, z + d / 2, g); g.userData.go = go; scene.add(g); return g; };
+  const mx = FW / 2 - 4.5, mz = -FD / 2 + 4; room(mx, mz, 7, 6, 'Reuniones', 'board');
+  box(4, 0.25, 2, 0xffffff, mx, 1.4, mz).userData.go = 'board'; cyl(0.15, 1.3, 0x84858a, mx, 0.75, mz);
+  for (let i = -1; i <= 1; i += 2) for (let j = -1; j <= 1; j++) box(0.7, 0.9, 0.7, 0x2f333c, mx + j * 1.4, 0.75, mz + i * 1.5);
+  // decoración: plantas, estantes, lámparas, dispensador
+  const plant = (x, z) => { cyl(0.45, 0.8, 0xffffff, x, 0.7, z); const s = new T.Mesh(new T.SphereGeometry(0.75, 12, 10), M(0x3f886b)); s.position.set(x, 1.6, z); s.castShadow = !mobile; scene.add(s); };
+  plant(-FW / 2 + 1.2, FD / 2 - 1.2); plant(FW / 2 - 1.2, FD / 2 - 1.2); plant(-1, -FD / 2 + 1.2); plant(FW / 2 - 1.2, 0);
+  box(1.2, 4, 3.2, 0x7e3628, -FW / 2 + 0.9, 2.3, -FD / 2 + 3); [0.9, 1.9, 2.9, 3.9].forEach(y => [-1, 0, 1].forEach(z => box(0.5, 0.7, 0.5, PALETTE[(y * 3 + z + 5) % PALETTE.length], -FW / 2 + 1.3, y + 0.3, -FD / 2 + 3 + z * 0.9)));
+  cyl(0.4, 1.8, 0x9fd8ff, 0.8, 1.2, -FD / 2 + 1);
+  // personajes de bloques
+  const skin = M(0xf3bb40), pants = M(0x2f333c), clickables = [];
+  const figure = (c, x, z, rotY, seated) => {
+    const g = new T.Group(), col = new T.Color(c.color || '#0080E8'), mt = M(col);
+    const legY = seated ? 0.9 : 0.75;
+    if (seated) { box(0.75, 0.35, 0.9, pants, 0, legY, 0.25, g); box(0.75, 0.6, 0.3, pants, 0, legY - 0.4, 0.65, g); } else { box(0.34, 1, 0.4, pants, -0.2, 0.8, 0, g); box(0.34, 1, 0.4, pants, 0.2, 0.8, 0, g); }
+    box(0.85, 0.95, 0.5, mt, 0, legY + 0.65, 0, g); box(0.22, 0.8, 0.26, mt, -0.55, legY + 0.6, seated ? 0.2 : 0, g); box(0.22, 0.8, 0.26, mt, 0.55, legY + 0.6, seated ? 0.2 : 0, g);
+    cyl(0.3, 0.55, skin, 0, legY + 1.45, 0, g, 18); cyl(0.13, 0.15, skin, 0, legY + 1.8, 0, g, 10);
+    const hair = M(c.ceo ? 0x2f333c : 0x4d3a2a), hy = legY + 1.72;
+    if (c.hair === 'wizard') { const cone = new T.Mesh(new T.ConeGeometry(0.42, 1.1, 16), M(col.clone().multiplyScalar(0.7))); cone.position.set(0, hy + 0.5, 0); g.add(cone); cyl(0.5, 0.06, col.clone().multiplyScalar(0.7), 0, hy, 0, g); }
+    else if (c.hair === 'cap') { cyl(0.33, 0.22, mt, 0, hy, 0, g); box(0.4, 0.06, 0.35, mt, 0, hy - 0.08, 0.3, g); }
+    else if (c.hair !== 'none') { cyl(0.33, 0.22, hair, 0, hy, 0, g); if (c.hair === 'long') box(0.62, 0.55, 0.2, hair, 0, hy - 0.3, -0.22, g); }
+    if (c.ceo) { const crown = cyl(0.25, 0.18, M(0xf3bb40), 0, hy + 0.35, 0, g, 8); crown.material.emissive = new T.Color(0x553300); }
+    g.position.set(x, 0.25, z); g.rotation.y = rotY; g.traverse(o => { o.userData.member = c.id; }); scene.add(g); clickables.push(g); return g;
+  };
+  const desk = (x, z, rot, c, big) => { const g = new T.Group(), w = big ? 4 : 2.8;
+    box(w, 0.18, 1.6, dark ? 0x3a4154 : 0xffffff, 0, 1.6, 0, g); box(0.12, 1.5, 1.4, 0x84858a, -w / 2 + 0.1, 0.85, 0, g); box(0.12, 1.5, 1.4, 0x84858a, w / 2 - 0.1, 0.85, 0, g);
+    box(w, 0.06, 0.12, c.color || '#0080E8', 0, 1.72, 0.78, g);
+    const scr = new T.MeshStandardMaterial({ color: 0x0b1530, emissive: new T.Color(c.color || '#0080E8').multiplyScalar(dark ? 0.6 : 0.35) });
+    box(1.3, 0.8, 0.08, scr, -0.5, 2.2, -0.5, g); box(0.1, 0.4, 0.1, 0x2f333c, -0.5, 1.85, -0.5, g); if (big) box(1.3, 0.8, 0.08, scr, 0.9, 2.2, -0.5, g);
+    box(0.9, 0.12, 0.9, 0x2f333c, 0, 0.95, 1.25, g); box(0.9, 0.9, 0.12, 0x2f333c, 0, 1.4, 1.7, g);
+    g.position.set(x, 0.25, z); g.rotation.y = rot; g.traverse(o => { o.userData.member = c.id; }); scene.add(g); clickables.push(g);
+    const st = memberStats(c); if (st.late) { const l = new T.PointLight(0xff3b30, 1.2, 4); l.position.set(x, 3, z); scene.add(l); }
+    figure(c, x + Math.sin(rot) * 1.25, z + Math.cos(rot) * 1.25, rot + Math.PI, true); };
+  const ceo = members.find(m => m.ceo), others = members.filter(m => !m.ceo);
+  // oficina CEO (esquina frontal izquierda, con vidrio)
+  const cx = -FW / 2 + 5, cz = FD / 2 - 4; room(cx, cz, 7.5, 6.5, 'CEO', null);
+  if (ceo) desk(cx, cz - 0.6, 0, ceo, true);
+  others.forEach((m, i) => { const r = Math.floor(i / cols), cI = i % cols, x = -FW / 2 + 10.5 + cI * 4.2, z = -FD / 2 + 9.5 + r * 5.5; desk(x, z, 0, m, false); });
+  // etiquetas HTML sobre cada integrante
+  const labels = members.map(m => { const st = memberStats(m); const el = h('button', { class: 'of-label' + (st.late ? ' late' : ''), style: `--c:${m.color}`, title: `${m.name} · ${m.role || 'Sin rol'} · ${st.pend} pendientes` + (st.late ? ` · ${st.late} atrasadas` : ''), onclick: () => openMember(m) }, h('b', {}, (m.ceo ? '👑 ' : '') + m.name.split(' ')[0]), st.pend ? h('i', {}, st.pend) : null, h('span', {}, m.role || 'Sin rol')); wrap.append(el); return { el, m }; });
+  const posOf = id => { let p = null; clickables.forEach(g => { if (!p && g.userData.member === id && g.children.length > 6) { p = g.position.clone(); p.y = 3.6; } }); return p; };
+  const placeLabels = () => labels.forEach(({ el, m }) => { const p = posOf(m.id); if (!p) return; p.project(cam); el.style.left = ((p.x + 1) / 2 * wrap.clientWidth) + 'px'; el.style.top = ((1 - p.y) / 2 * wrap.clientHeight) + 'px'; });
+  // controles: arrastrar = girar, rueda/pellizco = zoom, Shift/2 dedos = mover
+  let drag = null, pinch = null; const el = renderer.domElement, ray = new T.Raycaster(), mv = new T.Vector2();
+  el.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, t: theta, p: phi, tx: target.x, tz: target.z, pan: e.shiftKey || e.button === 2, moved: false }; el.setPointerCapture(e.pointerId); });
+  el.addEventListener('pointermove', e => { if (!drag || pinch) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    if (drag.pan) { const s = 0.05 / zoom; target.x = drag.tx - (dx * Math.cos(theta) + dy * Math.sin(theta)) * s; target.z = drag.tz - (-dx * Math.sin(theta) + dy * Math.cos(theta)) * s; }
+    else { theta = drag.t - dx * 0.008; phi = Math.max(0.25, Math.min(1.35, drag.p + dy * 0.006)); } setCam(); });
+  el.addEventListener('pointerup', e => { if (drag && !drag.moved) { const r = el.getBoundingClientRect(); mv.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1); ray.setFromCamera(mv, cam);
+    const hit = ray.intersectObjects(scene.children, true).find(i => { let o = i.object; while (o) { if (o.userData.member || o.userData.go) return true; o = o.parent; } return false; });
+    if (hit) { let o = hit.object; while (o && !o.userData.member && !o.userData.go) o = o.parent; if (o.userData.member) openMember(S.kcols.find(x => x.id === o.userData.member)); else if (o.userData.go) go(o.userData.go); } } drag = null; });
+  el.addEventListener('contextmenu', e => e.preventDefault());
+  el.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(0.45, Math.min(3, zoom * (e.deltaY < 0 ? 1.1 : 0.9))); setCam(); }, { passive: false });
+  const touches = new Map();
+  el.addEventListener('touchstart', e => { if (e.touches.length === 2) { const [a, b] = e.touches; pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), z: zoom }; } }, { passive: true });
+  el.addEventListener('touchmove', e => { if (pinch && e.touches.length === 2) { const [a, b] = e.touches; zoom = Math.max(0.45, Math.min(3, pinch.z * Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / pinch.d)); setCam(); } }, { passive: true });
+  el.addEventListener('touchend', () => { if (pinch) { pinch = null; drag = null; } });
+  const ro = new ResizeObserver(() => { renderer.setSize(wrap.clientWidth, wrap.clientHeight); setCam(); }); ro.observe(wrap);
+  let raf = 0, alive = true; const loop = () => { if (!alive) return; raf = requestAnimationFrame(loop); if (!document.contains(wrap)) return OF?.dispose(); renderer.render(scene, cam); placeLabels(); };
+  setCam(); loop();
+  OF = { dispose: () => { alive = false; cancelAnimationFrame(raf); ro.disconnect(); renderer.dispose(); scene.traverse(o => { o.geometry?.dispose?.(); }); },
+    zoom: f => { zoom = Math.max(0.45, Math.min(3, zoom * f)); setCam(); }, reset: () => { zoom = mobile ? 0.8 : 1.45; theta = Math.PI / 4; phi = 0.62; target.set(0, 0, 0); setCam(); } };
+}
+
+/* --- Centro de datos: subir bases y generar tareas --- */
+async function readTable(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'csv' || ext === 'txt') { const txt = await file.text(), sep = (txt.split('\n')[0].match(/;/g) || []).length > (txt.split('\n')[0].match(/,/g) || []).length ? ';' : ',';
+    const rows = []; for (const line of txt.replace(/\r/g, '').split('\n')) { if (!line.trim()) continue; const out = []; let cur = '', qd = false; for (const ch of line) { if (ch === '"') qd = !qd; else if (ch === sep && !qd) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); rows.push(out.map(s => s.trim())); } return rows; }
+  if (!window.ExcelJS) throw new Error('Cargando librería de Excel, intenta de nuevo');
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await file.arrayBuffer()); const ws = wb.worksheets[0]; const rows = [];
+  ws.eachRow({ includeEmpty: false }, row => { const v = []; for (let c = 1; c <= ws.columnCount; c++) { const x = cellVal(row.getCell(c)); v.push(x instanceof Date ? iso(x) : x == null ? '' : String(x)); } rows.push(v); }); return rows;
+}
+function guessCol(head, words) { const i = head.findIndex(x => words.some(w => norm(x).includes(w))); return i < 0 ? '' : String(i); }
+async function dataCenter(m) {
+  const ro = !canEdit(), sets = S.datasets.filter(d => d.author === S.user.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const area = h('div', {});
+  const pick = h('input', { type: 'file', accept: '.xlsx,.csv,.txt', class: 'hidden', id: 'dc-file' });
+  const zone = dropTarget(h('div', { class: 'drop', role: 'button', tabIndex: 0, onclick: () => pick.click() }, h('b', {}, '🗄 Arrastra una base de datos o haz clic para cargarla'), h('div', { class: 'muted' }, 'Excel (.xlsx) o CSV · cada fila puede convertirse en una tarea')), files => load(files[0]));
+  pick.addEventListener('change', () => pick.files[0] && load(pick.files[0]));
+  async function load(file) {
+    let rows; try { rows = await readTable(file); } catch (e) { return toast(e.message, 'err'); }
+    if (rows.length < 2) return toast('La base no tiene filas de datos', 'err');
+    const head = rows[0].map((x, i) => x || 'Columna ' + (i + 1)), data = rows.slice(1).filter(r => r.some(x => String(x).trim()));
+    const sel = (id, label, guess, opt) => h('div', { class: 'field' }, h('label', { for: id }, label), h('select', { class: 'input', id }, opt ? h('option', { value: '' }, '— Ninguna —') : null, head.map((x, i) => h('option', { value: i, selected: String(i) === guess }, x))));
+    const tm = team(), defWho = h('select', { class: 'input', id: 'dc-def' }, tm.map(x => h('option', { value: x.id }, `${x.name} · ${x.role || 'Sin rol'}`)));
+    const colsSel = [sel('dc-title', 'Columna con el nombre de la tarea *', guessCol(head, ['tarea', 'actividad', 'titulo', 'nombre', 'pendiente', 'proyecto', 'task']) || '0'),
+      sel('dc-who', 'Columna del responsable', guessCol(head, ['responsable', 'encargado', 'asignado', 'owner', 'persona']), true),
+      sel('dc-due', 'Columna de fecha límite', guessCol(head, ['fecha', 'vence', 'limite', 'entrega', 'due']), true),
+      sel('dc-desc', 'Columna de detalle', guessCol(head, ['descrip', 'detalle', 'comentario', 'nota']), true),
+      sel('dc-prio', 'Columna de prioridad', guessCol(head, ['prioridad', 'priority']), true)];
+    const pv = h('div', { class: 'sheet-prev', style: 'max-height:280px' }, h('table', {}, h('tr', {}, head.map(x => h('th', {}, x))), data.slice(0, 8).map(r => h('tr', {}, head.map((_, i) => h('td', {}, r[i] ?? ''))))));
+    area.replaceChildren(h('div', { class: 'card', style: 'margin-top:14px' }, h('h2', {}, '📄 ' + file.name), h('p', { class: 'muted' }, `${data.length} filas · elige qué columna corresponde a cada dato`), pv,
+      h('div', { class: 'form-grid' }, colsSel, h('div', { class: 'field' }, h('label', { for: 'dc-def' }, 'Si no hay responsable, asignar a'), defWho)),
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', id: 'dc-new', checked: true }), 'Si un responsable no existe en la oficina, agregarlo como integrante'),
+      ro ? null : h('div', { style: 'display:flex;gap:8px;justify-content:flex-end' }, h('button', { class: 'btn', onclick: () => area.replaceChildren() }, 'Cancelar'),
+        h('button', { class: 'btn primary', id: 'dc-gen', onclick: async e => {
+          e.currentTarget.disabled = true; const gv = id => $('#' + id).value, ti = gv('dc-title'), wi = gv('dc-who'), di = gv('dc-due'), de = gv('dc-desc'), pi = gv('dc-prio'), mk = $('#dc-new').checked;
+          const byName = new Map(team().map(x => [norm(x.name), x])), rowsOut = [];
+          for (const r of data) { const title = String(r[ti] ?? '').trim(); if (!title) continue;
+            let col = null; const wn = wi !== '' ? String(r[wi] ?? '').trim() : '';
+            if (wn) { col = byName.get(norm(wn)) || [...byName.values()].find(x => norm(x.name).includes(norm(wn)) || norm(wn).includes(norm(x.name)));
+              if (!col && mk) { [col] = await q(sb.from('kcols').insert({ name: wn, role: 'Sin rol', color: PALETTE[myCols().length % PALETTE.length], position: nextPos(myCols()), author: S.user.id }).select()); S.kcols.push(col); byName.set(norm(wn), col); } }
+            col = col || S.kcols.find(x => x.id === defWho.value);
+            const pr = pi !== '' ? norm(r[pi]) : '', due = di !== '' ? fromText({ type: 'date' }, r[di]) : null;
+            rowsOut.push({ title: title.slice(0, 200), body: de !== '' ? String(r[de] ?? '') : '', col_id: col.id, due, prio: pr.startsWith('a') || pr.startsWith('h') ? 'alta' : pr.startsWith('b') || pr.startsWith('l') ? 'baja' : 'media', done: false, is_task: true, from: 'data', position: nextPos(cardsOf(col.id)) + rowsOut.length, author: S.user.id }); }
+          if (!rowsOut.length) { e.currentTarget.disabled = false; return toast('No se encontraron tareas en esa columna', 'err'); }
+          const ins = await q(sb.from('kcards').insert(rowsOut).select()); S.kcards.push(...ins);
+          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: ins.length, author: S.user.id }).select()); S.datasets.push(ds);
+          await upload({ id: ds.id }, [file], () => {});
+          toast(`${ins.length} tareas generadas y asignadas`, 'ok'); S.otab = 'office'; render();
+        } }, '⚡ Generar tareas'))));
+  }
+  m.append(h('section', { class: 'card' }, h('h2', {}, 'Centro de datos'), h('p', { class: 'muted' }, 'Sube una base de datos y la oficina convierte cada fila en una tarea asignada al integrante que corresponda.'), ro ? null : h('div', {}, zone, pick)), area,
+    h('section', { class: 'card', style: 'margin-top:14px' }, h('h2', {}, 'Bases cargadas'), sets.length ? sets.map(d => { const f = S.attachments.find(a => a.project_id === d.id);
+      return h('div', { class: 'file' }, h('span', { class: 'ext', style: 'background:var(--green)' }, (d.name.split('.').pop() || '').slice(0, 4)), h('div', { class: 'fi' }, h('b', {}, d.name), h('span', { class: 'muted' }, `${d.rows} filas · ${d.tasks} tareas generadas · ${new Date(d.created_at).toLocaleString('es-CR')}`)),
+        f ? h('button', { class: 'btn', onclick: () => viewFile(f) }, 'Ver') : null, f ? h('button', { class: 'btn', onclick: () => downloadFile(f) }, 'Descargar') : null); }) : h('p', { class: 'muted' }, 'Aún no has cargado bases de datos.')));
+}
+
+function renderOffice(m) {
+  ensureCEO();
+  const tab = S.otab || 'office', ro = !canEdit(), members = team();
+  const tabs = h('div', { class: 'seg', role: 'tablist' }, [['office', '🏢 Oficina'], ['team', '👥 Equipo y tareas'], ['data', '🗄 Centro de datos']].map(([k, l]) => h('button', { class: tab === k ? 'on' : '', role: 'tab', onclick: () => { S.otab = k; render(); } }, l)));
+  m.replaceChildren(h('div', { class: 'page-head hero' }, h('div', {}, h('h1', {}, 'Mi oficina'), h('p', {}, 'Tu equipo, sus roles y sus tareas · tú eres el CEO 👑')), tabs));
+  const actions = ro ? null : h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('button', { class: 'btn primary', id: 'of-add', onclick: () => memberForm() }, h('span', { svg: I.plus }), 'Integrante'),
+    h('button', { class: 'btn', onclick: () => { const c = members[0]; if (c) taskForm(c); } }, h('span', { svg: I.plus }), 'Asignar tarea'));
+  if (tab === 'data') return dataCenter(m);
+  if (tab === 'team') {
+    m.append(h('div', { class: 'toolbar' }, actions, h('span', { class: 'muted' }, `${members.length} integrantes`)),
+      h('div', { class: 'of-grid' }, members.map(c => { const st = memberStats(c);
+        return h('button', { class: 'of-card' + (st.late ? ' late' : ''), style: `--c:${c.color}`, onclick: () => openMember(c) }, h('div', { class: 'of-avatar', style: `--c:${c.color}` }, h('span', {}, initials(c.name))),
+          h('b', {}, (c.ceo ? '👑 ' : '') + c.name), h('span', { class: 'muted' }, c.role || 'Sin rol'),
+          (c.traits || []).length ? h('div', { class: 'of-traits' }, c.traits.slice(0, 3).map(t => h('span', { class: 'tag', style: `--tc:${c.color}` }, t))) : null,
+          h('div', { class: 'of-mini' }, h('span', {}, `${st.pend} pendientes`), st.late ? h('span', { class: 'late' }, `${st.late} atrasadas`) : null, h('span', {}, `${st.done} hechas`))); })));
+    return;
+  }
+  const wrap = h('div', { class: 'of-3d' }, h('div', { class: 'of-load muted' }, 'Construyendo la oficina…'));
+  const ctl = h('div', { class: 'of-ctl' }, h('button', { class: 'btn', 'aria-label': 'Acercar', onclick: () => OF?.zoom(1.2) }, '+'), h('button', { class: 'btn', 'aria-label': 'Alejar', onclick: () => OF?.zoom(0.83) }, '−'), h('button', { class: 'btn', onclick: () => OF?.reset() }, 'Centrar'));
+  m.append(h('div', { class: 'toolbar' }, actions, h('span', { class: 'muted' }, 'Arrastra para girar · rueda o pellizco para zoom · Shift + arrastrar para mover · clic en una persona para ver sus tareas')), h('div', { class: 'of-stage' }, wrap, ctl));
+  loadLib('lib/three.min.js', 'THREE').then(() => { wrap.querySelector('.of-load')?.remove(); try { office3D(wrap, members); } catch (e) { wrap.replaceChildren(h('p', { class: 'muted', style: 'padding:20px' }, 'Tu navegador no pudo mostrar la oficina 3D. Usa la pestaña «Equipo y tareas».')); } })
+    .catch(() => wrap.replaceChildren(h('p', { class: 'muted', style: 'padding:20px' }, 'No se pudo cargar el motor 3D.')));
 }
 
 /* ---------- notificaciones: fechas que vencen en 2 días o menos ---------- */
