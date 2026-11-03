@@ -234,7 +234,7 @@ function renderShell() {
         h('button', { id: 'nav-office', class: S.view === 'office' ? 'on' : '', onclick: () => go('office') }, h('span', { svg: I.office }), 'Mi oficina')),
       h('div', { class: 'right' }, h('button', { class: 'icon-btn bell', id: 'theme-btn', 'aria-label': 'Modo noche', title: 'Modo noche / día', onclick: toggleTheme }, h('span', { svg: document.documentElement.dataset.theme === 'dark' ? I.sun : I.moon })), h('button', { class: 'icon-btn bell', id: 'bell', 'aria-label': 'Notificaciones', title: 'Notificaciones', onclick: e => notifPanel(e.currentTarget) }, h('span', { svg: I.bell }), h('b', { id: 'bell-n', class: 'hidden' })), h('button', { class: 'role-chip lock-chip', title: 'Bloquear pantalla', 'aria-label': 'Bloquear pantalla', onclick: lockScreen }, h('span', { svg: I.lock }), p.role),
         h('button', { class: 'icon-btn', style: 'width:auto;height:auto', title: p.email, 'aria-label': 'Cuenta', onclick: e => menu(e.currentTarget, [
-          { label: p.email, run: () => {} }, { label: '🔒 Bloquear pantalla', run: lockScreen }, { label: '🔔 Probar recordatorio', run: testReminder }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
+          { label: p.email, run: () => {} }, { label: '🔒 Bloquear pantalla', run: lockScreen }, { label: '🔔 Probar recordatorio', run: testReminder }, { label: '📤 Exportar para Amazon QuickSight', run: exportQuickSight }, isAdmin() && { label: 'Usuarios y permisos', run: usersModal }, isAdmin() && { label: 'Actualizar token de GitHub', run: tokenModal }, canEdit() && { label: 'Cambiar contraseña', run: passwordModal }, '-', { label: 'Cerrar sesión', run: () => sb.auth.signOut() }]) },
           h('span', { class: 'avatar', style: `background:${hashColor(p.email)}` }, initials(p.email))))),
     h('main', { id: 'main' })));
   render();
@@ -2505,6 +2505,24 @@ async function importExcel(f, updateExisting) {
   }
   await loadAll(); S.view = 'board'; renderShell();
   toast(`Importación lista: ${created} creados, ${updated} actualizados${skipped.length ? ' · hojas omitidas: ' + skipped.join(', ') : ''}`, 'ok');
+}
+/* exportación plana (una hoja por tabla, tipos limpios) para cargar como datasets en Amazon QuickSight */
+async function exportQuickSight() {
+  try { await loadLib('lib/xlsx.full.min.js?v=1', 'XLSX'); toast('Preparando datos para QuickSight…');
+    const val = (c, v) => v == null || v === '' ? null : ['money', 'number', 'progress', 'priority'].includes(c.type) ? num(v) : c.type === 'checkbox' ? (v ? 'Sí' : 'No') : Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : v;
+    const gname = id => S.groups.find(g => g.id === id)?.name || '', pc = cols('project'), sc = cols('sub');
+    const proj = S.projects.filter(p => !p.parent_id).map(p => { const o = { id: p.id, grupo: gname(p.group_id), nombre: p.data.name || '' }; pc.forEach(c => o[c.label] = c.type === 'money' ? moneyOf(p, c.key).v ?? null : c.type === 'progress' ? progressOf(p).v ?? null : val(c, p.data[c.key])); o.subtareas = subsOf(p.id).length; o.comentarios = S.comments.filter(x => x.project_id === p.id).length; o.creado = String(p.created_at || '').slice(0, 10); o.actualizado = String(p.updated_at || '').slice(0, 10); return o; });
+    const subs = S.projects.filter(p => p.parent_id).map(p => { const par = findP(p.parent_id), o = { id: p.id, proyecto_id: p.parent_id, proyecto: par?.data.name || '', grupo: gname(par?.group_id), nombre: p.data.name || '' }; sc.forEach(c => o[c.label] = c.type === 'progress' ? subProgress(p) : val(c, p.data[c.key])); return o; });
+    const qc = cols('quote'), quotes = S.quotes.map(x => { const o = { id: x.id }; qc.forEach(c => o[c.label] = val(c, x.data[c.key])); return o; });
+    const segs = S.segs.map(s => ({ id: s.id, titulo: s.title, detalle: s.body || '', estado: segState(s), vence: s.due || null, creado: String(s.created_at || '').slice(0, 10), listo: s.status === 'done' ? 'Sí' : 'No' }));
+    const tasks = S.kcards.map(k => { const c = S.kcols.find(x => x.id === k.col_id); return { id: k.id, titulo: k.title, detalle: k.body || '', persona: c?.name || '', rol: c?.role || '', proyecto: k.project_id ? findP(k.project_id)?.data.name || '' : '', vence: k.due || null, prioridad: k.prio || '', hecha: k.done ? 'Sí' : 'No', origen: k.from || 'manual', es_tarea_oficina: k.is_task ? 'Sí' : 'No' }; });
+    const coms = S.comments.map(c => ({ id: c.id, proyecto: findP(c.project_id)?.data.name || '', autor: c.author_email, fecha: String(c.created_at || '').slice(0, 10), comentario: c.body }));
+    const team0 = S.kcols.map(c => ({ id: c.id, nombre: c.name, rol: c.role || '', pendientes: S.kcards.filter(k => k.col_id === c.id && !k.done).length, hechas: S.kcards.filter(k => k.col_id === c.id && k.done).length }));
+    const wb = XLSX.utils.book_new(), add = (name, rows) => rows.length && XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), name.slice(0, 31));
+    add('Proyectos', proj); add('Subtareas', subs); add('Cotizaciones', quotes); add('Seguimientos', segs); add('Tareas', tasks); add('Equipo', team0); add('Comentarios', coms);
+    for (const d0 of S.datasets.filter(d => d.head)) { const d = await fullOf(d0); add('Base ' + d.name.replace(/\.[^.]+$/, '').replace(/[\\/?*[\]:]/g, ''), d.data.map(r => Object.fromEntries(d.head.map((hh, i) => [hh, r[i] ?? ''])))); }
+    XLSX.writeFile(wb, `Liberty_QuickSight_${iso(new Date())}.xlsx`); toast('Listo: súbelo en QuickSight → Datasets → Nuevo dataset → Cargar archivo', 'ok');
+  } catch (e) { toast('No se pudo exportar: ' + e.message, 'err'); }
 }
 async function exportExcel() {
   if (!window.ExcelJS) return toast('Cargando librería de Excel, intenta de nuevo', 'err');
