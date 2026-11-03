@@ -1014,23 +1014,33 @@ function materialPanel(m) {
 }
 
 /* --- Centro de datos: subir bases y generar tareas --- */
-async function readTable(file) {
+function readBuf(file, onP) { return new Promise((ok, ko) => { const r = new FileReader(); r.onprogress = e => e.lengthComputable && onP && onP(e.loaded / e.total); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('El navegador no pudo abrir el archivo (¿está abierto en Excel o en OneDrive sin descargar?)')); r.readAsArrayBuffer(file); }); }
+async function readTable(file, onP = () => {}) {
   const ext = file.name.split('.').pop().toLowerCase();
-  if (ext === 'csv' || ext === 'txt') { const txt = await file.text(), sep = (txt.split('\n')[0].match(/;/g) || []).length > (txt.split('\n')[0].match(/,/g) || []).length ? ';' : ',';
-    const rows = []; for (const line of txt.replace(/\r/g, '').split('\n')) { if (!line.trim()) continue; const out = []; let cur = '', qd = false; for (const ch of line) { if (ch === '"') qd = !qd; else if (ch === sep && !qd) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); rows.push(out.map(s => s.trim())); } return rows; }
-  if (!window.ExcelJS) throw new Error('Cargando librería de Excel, intenta de nuevo');
-  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await file.arrayBuffer()); const ws = wb.worksheets[0]; const rows = [];
-  ws.eachRow({ includeEmpty: false }, row => { const v = []; for (let c = 1; c <= ws.columnCount; c++) { const x = cellVal(row.getCell(c)); v.push(x instanceof Date ? iso(x) : x == null ? '' : String(x)); } rows.push(v); }); return rows;
+  if (!['xlsx', 'xlsm', 'xls', 'xlsb', 'ods', 'csv', 'txt', 'tsv'].includes(ext)) throw new Error('Formato no soportado: .' + ext + ' (usa Excel, CSV u ODS)');
+  const buf = await readBuf(file, v => onP(v * 0.6));
+  onP(0.65); await loadLib('lib/xlsx.full.min.js?v=1', 'XLSX'); onP(0.75);
+  let wb; try { wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true, dense: true, codepage: 65001 }); }
+  catch (e) { throw new Error(/password|encrypt|cfb/i.test(e.message) ? 'El archivo está protegido con contraseña o etiqueta de confidencialidad; guárdalo sin protección e intenta de nuevo' : 'No se pudo leer el archivo: ' + e.message); }
+  onP(0.9);
+  const ws = wb.SheetNames.map(n => wb.Sheets[n]).find(s => s && s['!ref']) || null; if (!ws) throw new Error('El archivo no tiene hojas con datos');
+  let rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: false });
+  rows = rows.map(r => r.map(x => x instanceof Date ? iso(x) : x == null ? '' : String(x).trim()));
+  const hi = rows.findIndex(r => r.filter(x => x !== '').length >= Math.min(2, Math.max(...rows.slice(0, 20).map(r => r.filter(x => x !== '').length)))); // salta filas de título vacías
+  onP(1); return hi > 0 ? rows.slice(hi) : rows;
 }
 function guessCol(head, words) { const i = head.findIndex(x => words.some(w => norm(x).includes(w))); return i < 0 ? '' : String(i); }
 async function dataCenter(m) {
   const ro = !canEdit(), sets = S.datasets.filter(d => d.author === S.user.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   const area = h('div', {});
-  const pick = h('input', { type: 'file', accept: '.xlsx,.csv,.txt', class: 'hidden', id: 'dc-file' });
-  const zone = dropTarget(h('div', { class: 'drop', role: 'button', tabIndex: 0, onclick: () => pick.click() }, h('b', {}, '🗄 Arrastra una base de datos o haz clic para cargarla'), h('div', { class: 'muted' }, 'Excel (.xlsx) o CSV · cada fila puede convertirse en una tarea')), files => load(files[0]));
+  const pick = h('input', { type: 'file', accept: '.xlsx,.xlsm,.xls,.xlsb,.ods,.csv,.tsv,.txt', class: 'hidden', id: 'dc-file' });
+  const zone = dropTarget(h('div', { class: 'drop', role: 'button', tabIndex: 0, onclick: () => pick.click() }, h('b', {}, '🗄 Arrastra una base de datos o haz clic para cargarla'), h('div', { class: 'muted' }, 'Excel (.xlsx, .xls, .xlsb), ODS o CSV · cada fila puede convertirse en una tarea')), files => load(files[0]));
   pick.addEventListener('change', () => pick.files[0] && load(pick.files[0]));
   async function load(file) {
-    let rows; try { rows = await readTable(file); } catch (e) { return toast(e.message, 'err'); }
+    if (!file) return; if (file.size > 26214400) return toast('La base supera 25 MB; divídela o guárdala como CSV', 'err');
+    const pg = uploadBar(file.name, file.size); pg.label('Leyendo…');
+    let rows; try { rows = await readTable(file, v => pg.set(v, 'Leyendo…')); } catch (e) { pg.fail(e.message); return toast(e.message, 'err'); }
+    pg.done('✓ Leída'); pick.value = '';
     if (rows.length < 2) return toast('La base no tiene filas de datos', 'err');
     const head = rows[0].map((x, i) => x || 'Columna ' + (i + 1)), data = rows.slice(1).filter(r => r.some(x => String(x).trim()));
     const sel = (id, label, guess, opt) => h('div', { class: 'field' }, h('label', { for: id }, label), h('select', { class: 'input', id }, opt ? h('option', { value: '' }, '— Ninguna —') : null, head.map((x, i) => h('option', { value: i, selected: String(i) === guess }, x))));
@@ -2145,11 +2155,11 @@ function uploadBar(name, size) {
   const el = h('div', { class: 'up' }, h('div', { class: 'up-top' }, h('span', { class: 'up-n', title: name }, name), pct), h('div', { class: 'up-bar' }, fill), h('div', { class: 'up-sub' }, st, h('span', {}, (size / 1048576).toFixed(size > 1048576 ? 1 : 2) + ' MB')));
   box.append(el);
   const end = (cls, txt) => { el.classList.add(cls); st.textContent = txt; setTimeout(() => { el.remove(); if (!box.children.length) box.remove(); }, cls === 'ok' ? 2500 : 6000); };
-  return { set: v => { const n = Math.min(100, Math.round(v * 100)); fill.style.width = n + '%'; pct.textContent = n + '%'; st.textContent = n < 100 ? 'Subiendo…' : 'Procesando…'; },
-    done: () => { fill.style.width = '100%'; pct.textContent = '100%'; end('ok', '✓ Subido'); }, fail: m => end('err', 'Error: ' + m) };
+  return { label: t => { st.textContent = t; }, set: (v, t) => { const n = Math.min(100, Math.round(v * 100)); fill.style.width = n + '%'; pct.textContent = n + '%'; st.textContent = t || (n < 100 ? 'Subiendo…' : 'Procesando…'); },
+    done: t => { fill.style.width = '100%'; pct.textContent = '100%'; end('ok', t || '✓ Subido'); }, fail: m => end('err', 'Error: ' + m) };
 }
 async function upload(p, files, after = () => openDrawer(p.id, 'files')) {
-  const okExt = ACCEPT.split(',');
+  const okExt = ACCEPT.split(',').concat(['.xlsm', '.xlsb', '.ods', '.tsv', '.txt']);
   for (const f of files) {
     const ext = '.' + (f.name.split('.').pop() || '').toLowerCase();
     if (!okExt.includes(ext)) { toast(`Tipo no permitido: ${f.name}`, 'err'); continue; }
