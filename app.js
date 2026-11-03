@@ -895,12 +895,44 @@ function parseDue(t) {
 const findMember = t => { const n = norm(t); return team().filter(c => !c.ceo).sort((a, b) => b.name.length - a.name.length).find(c => n.includes(norm(c.name)) || n.includes(norm(c.name).split(' ')[0])); };
 const findTask = frag => { const f = norm(frag).trim(); if (f.length < 3) return null; return S.kcards.filter(k => k.is_task && k.author === S.user.id).find(k => norm(k.title).includes(f)); };
 const cleanTitle = s => s.replace(/\s+(a|para)\s+[^,]*$/i, '').replace(/\b(para|el|la)?\s*(hoy|mañana|manana|pasado mañana|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|en \d+ d[ií]as?|\d{1,2}[\/-]\d{1,2}([\/-]\d{2,4})?)\b.*$/i, '').replace(/^[:\-\s«"]+|[»"\s.]+$/g, '').trim();
-async function supervisorReply(text) {
+const ctxKey = () => 'chatctx:' + S.user.id;
+function saveCtx(c) { S.settings[ctxKey()] = c; q(sb.from('settings').upsert({ key: ctxKey(), value: c })).catch(() => {}); }
+async function supervisorReply(text0) {
+  const ctx = { ...(S.settings[ctxKey()] || {}) }; let text = text0.trim();
+  // resolver referencias a lo conversado: «él/ella», «esa tarea», «¿y Laura?», «esa base»
+  const said = findMember(text), pron = /\b(a ella|a el|a él|ella|él|el mismo|la misma|a esa persona)\b/i.test(text);
+  const ctxM = ctx.member && S.kcols.find(c => c.id === ctx.member), ctxK = ctx.task && S.kcards.find(k => k.id === ctx.task);
+  if (!said && pron && ctxM) text = text.replace(/\b(a ella|a el|a él|ella|él|el mismo|la misma|a esa persona)\b/i, ' ' + ctxM.name + ' ');
+  if (/\b(esa|esta|la ultima|la última) tarea\b|\b(reasignala|reasígnala|asignala|asígnala|marcala|márcala)\b/i.test(text) && ctxK) text = text.replace(/\b(esa|esta|la ultima|la última) tarea\b/i, ctxK.title).replace(/\b(reasignala|reasígnala|asignala|asígnala)\b/i, 'reasigna ' + ctxK.title).replace(/\b(marcala|márcala)\b/i, 'marca ' + ctxK.title);
+  if (/^y\s+/i.test(text) && said && ctx.intent === 'pend') text = '¿Qué tiene pendiente ' + said.name + '?';
+  const r = await supervisorCore(text, ctx);
+  const m2 = findMember(text); if (m2) ctx.member = m2.id; ctx.at = new Date().toISOString(); saveCtx(ctx);
+  return r;
+}
+async function supervisorCore(text, ctx) {
   const n = norm(text), sm = supervisorM(), ws = workers(), today = new Date(new Date().toDateString());
+  // datos cargados en el Centro de datos
+  const dsets = S.datasets.filter(d => d.author === S.user.id && d.head), dsOf = () => { const byName = dsets.find(d => n.includes(norm(d.name).replace(/\.[a-z]+$/, ''))); return byName || dsets.find(d => d.id === ctx.ds) || dsets.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0]; };
+  if (/\b(bases?|datos cargados|archivos? de datos|dataset)\b/.test(n) && /(que|cuales|lista|tengo|hay)/.test(n)) return dsets.length ? 'Bases cargadas:\n' + dsets.map(d => `• ${d.name}: ${d.rows} filas · columnas: ${d.head.join(', ')}`).join('\n') : 'Aún no hay bases cargadas. Súbelas en «Centro de datos» y podré consultarlas.';
+  if (/\b(base|datos|columna|filas?)\b/.test(n) && dsets.length) { const d = dsOf(); ctx.ds = d.id; const H = d.head.map(x => norm(x));
+    const col = H.findIndex(hh => hh && n.includes(hh));
+    if (/cuantas filas|cuantos registros|tamano/.test(n)) return `${d.name} tiene ${d.rows} filas.`;
+    if (/columnas|campos|estructura/.test(n)) return `${d.name} tiene estas columnas: ${d.head.join(', ')}.`;
+    if (/suma|total|promedio/.test(n) && col >= 0) { const v = d.data.map(r => num(r[col])).filter(x => x != null); if (!v.length) return `La columna «${d.head[col]}» no tiene números.`; const s = v.reduce((a, b) => a + b, 0); return `En ${d.name}, «${d.head[col]}»: suma ${s.toLocaleString('es-CR')}, promedio ${(s / v.length).toLocaleString('es-CR', { maximumFractionDigits: 2 })} (${v.length} valores).`; }
+    let mq = text.match(/busca(?:r)?\s+(.+?)(?:\s+en\s+.*)?$/i); if (mq) { const f = norm(mq[1]); const hits = d.data.filter(r => r.some(x => norm(x).includes(f))); return hits.length ? `Encontré ${hits.length} fila(s) con «${mq[1]}» en ${d.name}:\n` + hits.slice(0, 8).map(r => '• ' + r.filter(Boolean).slice(0, 4).join(' · ')).join('\n') + (hits.length > 8 ? `\n…y ${hits.length - 8} más.` : '') : `No encontré «${mq[1]}» en ${d.name}.`; }
+    if (/(crea|genera|convierte).*(tareas)/.test(n)) { const ti = d.head.findIndex(x => /tarea|actividad|titulo|nombre|pendiente|proyecto/.test(norm(x))), wi = d.head.findIndex(x => /responsable|encargado|asignado|persona/.test(norm(x))), di = d.head.findIndex(x => /fecha|vence|limite|entrega/.test(norm(x)));
+      const fm = text.match(/(?:con|donde|que contengan?)\s+(.+)$/i), ff = fm ? norm(fm[1]) : '', rowsX = d.data.filter(r => !ff || r.some(x => norm(x).includes(ff))).slice(0, 200);
+      if (!rowsX.length) return 'No hay filas que coincidan.'; const sv = sm || team()[0], byName = new Map(team().map(x => [norm(x.name), x]));
+      const recs = rowsX.map((r, i) => { const t = String(r[ti >= 0 ? ti : 0] ?? '').trim(); if (!t) return null; const who = wi >= 0 ? [...byName.values()].find(x => norm(r[wi] || '') && (norm(x.name).includes(norm(r[wi])) || norm(r[wi]).includes(norm(x.name).split(' ')[0]))) : null;
+        return { title: t.slice(0, 200), body: 'Generada desde ' + d.name, col_id: (who || sv).id, due: di >= 0 ? fromText({ type: 'date' }, r[di]) : null, prio: 'media', done: false, is_task: true, from: 'data', position: nextPos(cardsOf((who || sv).id)) + i, author: S.user.id, _who: !!who }; }).filter(Boolean);
+      const toIns = recs.map(({ _who, ...x }) => x), ins = await q(sb.from('kcards').insert(toIns).select()); S.kcards.push(...ins);
+      const pendSv = ins.filter(k => k.col_id === sv.id), dist = sm ? await distribute(pendSv, true) : [];
+      return `Creé ${ins.length} tarea(s) desde ${d.name}` + (dist.length ? ` y repartí ${dist.length} sin responsable según la carga.` : '.') + ' Puedes verlas en la ficha de cada persona.'; }
+    return `Estoy usando la base «${d.name}» (${d.rows} filas). Puedes pedirme: «¿cuántas filas tiene?», «¿qué columnas tiene?», «suma la columna Monto», «busca Esteban en la base» o «crea tareas de la base con Pendiente».`; }
   const fmtK = k => `• ${k.title}` + (k.due ? ` (vence ${new Date(k.due + 'T00:00').toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })})` : '');
   if (!ws.length) return 'Aún no hay personal en la oficina. Agrega integrantes en «Equipo y tareas» y yo me encargo de repartir el trabajo.';
   if (/^(hola|buen(os|as)|hey)/.test(n) && n.length < 25) return `¡Hola! Soy ${sm?.name || 'tu supervisor'}. Puedo asignar, repartir, reasignar y darte el estado del equipo. Escribe «ayuda» para ver ejemplos.`;
-  if (/ayuda|que puedes|comandos/.test(n)) return 'Puedes pedirme, por ejemplo:\n• «Distribuye: revisar contrato; preparar informe; llamar a Isoft» (las reparto yo)\n• «Asigna revisar contrato a Esteban para el viernes»\n• «Crea tarea preparar informe mensual mañana» (yo elijo a quién)\n• «Reparte los pendientes»\n• «Reasigna informe a Laura»\n• «Marca contrato como lista»\n• «¿Qué tiene pendiente Laura?»\n• «¿Quién está atrasado?» · «Resumen» · «¿Quién tiene más carga?»';
+  if (/ayuda|que puedes|comandos/.test(n)) return 'Puedes pedirme, por ejemplo:\n• «Distribuye: revisar contrato; preparar informe; llamar a Isoft» (las reparto yo)\n• «Asigna revisar contrato a Esteban para el viernes»\n• «Crea tarea preparar informe mensual mañana» (yo elijo a quién)\n• «Reparte los pendientes»\n• «Reasigna informe a Laura»\n• «Marca contrato como lista»\n• «¿Qué tiene pendiente Laura?»\n• «¿Quién está atrasado?» · «Resumen» · «¿Quién tiene más carga?»\n• Datos: «¿Qué bases tengo?», «¿Cuántas filas tiene la base?», «Busca Isoft en la base», «Crea tareas de la base con Pendiente»\n• Recuerdo lo que hablamos: «Asígnala a Laura», «¿Y Esteban?», «Reasigna esa tarea a él»';
   const lst = text.match(/^(?:distribuye|reparte|asigna(?:\s+estas)?(?:\s+tareas)?)\s*:\s*([\s\S]+)$/i);
   if (lst) { const titles = lst[1].split(/\n|;|\s*\|\s*|(?:,\s*)(?=[A-ZÁÉÍÓÚÑ])/).map(s => s.replace(/^[-•*\d.)\s]+/, '').trim()).filter(s => s.length > 2); if (!titles.length) return 'Escribe las tareas separadas por punto y coma o en líneas distintas.';
     const sv = supervisorM() || team()[0]; const rows = await q(sb.from('kcards').insert(titles.map((t, i) => ({ title: t.charAt(0).toUpperCase() + t.slice(1), body: 'Recibida por chat', col_id: sv.id, due: parseDue(t), prio: 'media', done: false, is_task: true, from: 'chat', position: nextPos(cardsOf(sv.id)) + i, author: S.user.id }))).select()); S.kcards.push(...rows);
@@ -911,16 +943,16 @@ async function supervisorReply(text) {
   if (/resumen|como vamos|estado/.test(n) && !findMember(text)) { let p = 0, l = 0, d = 0; ws.forEach(w => { const s = memberStats(w); p += s.pend; l += s.late; d += s.done; }); const top = ws.map(w => [w, memberStats(w).pend]).sort((a, b) => b[1] - a[1])[0];
     return `Resumen del equipo (${ws.length} personas):\n• ${p} pendientes · ${l} atrasadas · ${d} hechas\n• En mi bandeja sin asignar: ${inbox().length}\n• Más cargado: ${top[0].name} (${top[1]})`; }
   let mt = text.match(/^(?:re)?asign[ae]\s+(.+?)\s+a\s+([^,]+?)(?:\s+para\s+.*)?$/i);
-  if (mt && /^re/i.test(text.trim())) { const k = findTask(mt[1]), w = findMember(mt[2]); if (!k) return `No encontré una tarea que contenga «${mt[1]}».`; if (!w) return `No encontré a «${mt[2]}» en la oficina.`; await setCard(k, { col_id: w.id, position: nextPos(cardsOf(w.id)) }); (S.supQ = S.supQ || []).push({ id: w.id, text: `${w.name.split(' ')[0]}, ahora te toca «${String(k.title || '').slice(0, 30)}»` }); return `Hecho: «${k.title}» ahora es de ${w.name}.`; }
+  if (mt && /^re/i.test(text.trim())) { const k = findTask(mt[1]), w = findMember(mt[2]); if (!k) return `No encontré una tarea que contenga «${mt[1]}».`; if (!w) return `No encontré a «${mt[2]}» en la oficina.`; await setCard(k, { col_id: w.id, position: nextPos(cardsOf(w.id)) }); (S.supQ = S.supQ || []).push({ id: w.id, text: `${w.name.split(' ')[0]}, ahora te toca «${String(k.title || '').slice(0, 30)}»` }); ctx.task = k.id; return `Hecho: «${k.title}» ahora es de ${w.name}.`; }
   if (/^(asigna|asignale|crea|nueva|agrega|tarea)/.test(n)) {
     const w = findMember(text), due = parseDue(text); let title = text.replace(/^(asígnale|asignale|asigna|crea( una)?( tarea)?|nueva tarea|agrega( una)?( tarea)?|tarea)\s*:?\s*/i, '');
     if (w) title = title.replace(new RegExp('\\s+a\\s+' + w.name.split(' ')[0] + '.*$', 'i'), '').replace(new RegExp('\\s+para\\s+' + w.name.split(' ')[0] + '.*$', 'i'), ''); title = cleanTitle(title) || title.trim();
     if (!title) return 'Dime qué tarea quieres crear. Ej.: «Asigna revisar contrato a Esteban para el viernes».';
     const target = w || pickWorker({ title }); const [row] = await q(sb.from('kcards').insert({ title: title.charAt(0).toUpperCase() + title.slice(1), body: 'Asignada por el supervisor desde el chat', col_id: target.id, due, prio: /urgente|prioridad alta|ya mismo/.test(n) ? 'alta' : 'media', done: false, is_task: true, from: 'chat', position: nextPos(cardsOf(target.id)), author: S.user.id }).select()); S.kcards.push(row);
-    (S.supQ = S.supQ || []).push({ id: target.id, text: `${target.name.split(' ')[0]}, nueva tarea: «${row.title.slice(0, 30)}»` }); render();
+    (S.supQ = S.supQ || []).push({ id: target.id, text: `${target.name.split(' ')[0]}, nueva tarea: «${row.title.slice(0, 30)}»` }); ctx.task = row.id; ctx.member = target.id;
     return `Asignada «${row.title}» a ${target.name}` + (w ? '' : ` (tenía menos carga)`) + (due ? `, para el ${new Date(due + 'T00:00').toLocaleDateString('es-CR', { weekday: 'long', day: 'numeric', month: 'short' })}` : '') + '. Ya voy a darle la instrucción.'; }
   if (/marca|complet|termin|lista|hecha/.test(n)) { const frag = text.replace(/^(marca|completa|termina)\s*/i, '').replace(/\s+como\s+.*$/i, ''); const k = findTask(frag); if (k) { await setCard(k, { done: true }); return `Marcada como hecha: «${k.title}». ✅`; } }
-  const w = findMember(text); if (w) { const ks = cardsOf(w.id).filter(k => k.is_task && !k.done); return ks.length ? `${w.name} (${w.role || 'Sin rol'}) tiene ${ks.length} pendiente(s):\n` + ks.slice(0, 10).map(fmtK).join('\n') : `${w.name} no tiene pendientes. ¿Le asigno algo?`; }
+  const w = findMember(text); if (w) { ctx.intent = 'pend'; const ks = cardsOf(w.id).filter(k => k.is_task && !k.done); return ks.length ? `${w.name} (${w.role || 'Sin rol'}) tiene ${ks.length} pendiente(s):\n` + ks.slice(0, 10).map(fmtK).join('\n') : `${w.name} no tiene pendientes. ¿Le asigno algo?`; }
   return 'No entendí del todo 🤔. Prueba con: «Asigna [tarea] a [persona] para [fecha]», «Reparte los pendientes», «¿Quién está atrasado?» o escribe «ayuda».';
 }
 function chatPanel(m) {
@@ -981,6 +1013,9 @@ async function dataCenter(m) {
       h('div', { class: 'form-grid' }, colsSel, h('div', { class: 'field' }, h('label', { for: 'dc-def' }, 'Si no hay responsable, asignar a'), defWho)),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', id: 'dc-new', checked: true }), 'Si un responsable no existe en la oficina, agregarlo como integrante'),
       ro ? null : h('div', { style: 'display:flex;gap:8px;justify-content:flex-end' }, h('button', { class: 'btn', onclick: () => area.replaceChildren() }, 'Cancelar'),
+        h('button', { class: 'btn', id: 'dc-save', onclick: async e => { e.currentTarget.disabled = true;
+          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: 0, head, data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
+          await upload({ id: ds.id }, [file], () => {}); toast('Base guardada: el supervisor ya puede consultarla en el chat', 'ok'); render(); } }, '💾 Solo guardar la base'),
         h('button', { class: 'btn primary', id: 'dc-gen', onclick: async e => {
           e.currentTarget.disabled = true; const gv = id => $('#' + id).value, ti = gv('dc-title'), wi = gv('dc-who'), di = gv('dc-due'), de = gv('dc-desc'), pi = gv('dc-prio'), mk = $('#dc-new').checked;
           const byName = new Map(team().map(x => [norm(x.name), x])), rowsOut = [];
@@ -993,7 +1028,7 @@ async function dataCenter(m) {
             rowsOut.push({ title: title.slice(0, 200), body: de !== '' ? String(r[de] ?? '') : '', col_id: col.id, due, prio: pr.startsWith('a') || pr.startsWith('h') ? 'alta' : pr.startsWith('b') || pr.startsWith('l') ? 'baja' : 'media', done: false, is_task: true, from: 'data', position: nextPos(cardsOf(col.id)) + rowsOut.length, author: S.user.id }); }
           if (!rowsOut.length) { e.currentTarget.disabled = false; return toast('No se encontraron tareas en esa columna', 'err'); }
           const ins = await q(sb.from('kcards').insert(rowsOut).select()); S.kcards.push(...ins);
-          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: ins.length, author: S.user.id }).select()); S.datasets.push(ds);
+          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: ins.length, head, data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
           await upload({ id: ds.id }, [file], () => {});
           toast(`${ins.length} tareas generadas y asignadas`, 'ok'); S.otab = 'office'; render();
         } }, '⚡ Generar tareas'))));
@@ -1004,17 +1039,24 @@ async function dataCenter(m) {
         f ? h('button', { class: 'btn', onclick: () => viewFile(f) }, 'Ver') : null, f ? h('button', { class: 'btn', onclick: () => downloadFile(f) }, 'Descargar') : null); }) : h('p', { class: 'muted' }, 'Aún no has cargado bases de datos.')));
 }
 
-function renderOffice(m) {
+function chatBubble(m) {
+  document.querySelectorAll('.chat-fab,.chat-float').forEach(x => x.remove());
+  const unread = h('b', { class: 'chat-dot hidden' });
+  const fab = h('button', { class: 'chat-fab' + (S.chatOpen ? ' open' : ''), 'aria-label': 'Chat con el supervisor', onclick: () => { S.chatOpen = !S.chatOpen; chatBubble(m); } }, S.chatOpen ? '✕' : '💬', unread);
+  m.append(fab);
+  if (S.chatOpen) { const box = h('div', { class: 'chat-float' }); m.append(box); chatPanel(box); setTimeout(() => box.querySelector('textarea')?.focus(), 50); }
+}
+function renderOffice(m) { renderOffice0(m); chatBubble(m); }
+function renderOffice0(m) {
   ensureCEO();
   const tab = S.otab || 'office', ro = !canEdit(), members = team();
-  const tabs = h('div', { class: 'seg', role: 'tablist' }, [['office', '🏢 Oficina'], ['chat', '💬 Supervisor'], ['team', '👥 Equipo y tareas'], ['org', '🧭 Organigrama'], ['material', '📁 Material'], ['data', '🗄 Centro de datos']].map(([k, l]) => h('button', { class: tab === k ? 'on' : '', role: 'tab', onclick: () => { S.otab = k; render(); } }, l)));
+  const tabs = h('div', { class: 'seg', role: 'tablist' }, [['office', '🏢 Oficina'], ['team', '👥 Equipo y tareas'], ['org', '🧭 Organigrama'], ['material', '📁 Material'], ['data', '🗄 Centro de datos']].map(([k, l]) => h('button', { class: tab === k ? 'on' : '', role: 'tab', onclick: () => { S.otab = k; render(); } }, l)));
   m.replaceChildren(h('div', { class: 'page-head hero' }, h('div', {}, h('h1', {}, 'Mi oficina'), h('p', {}, 'Tu equipo, sus roles y sus tareas · tú eres el CEO 👑')), tabs));
   const actions = ro ? null : h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('button', { class: 'btn primary', id: 'of-add', onclick: () => memberForm() }, h('span', { svg: I.plus }), 'Integrante'),
     h('button', { class: 'btn', onclick: () => { const c = members[0]; if (c) taskForm(c); } }, h('span', { svg: I.plus }), 'Asignar tarea'),
-    h('button', { class: 'btn accent', onclick: () => { S.otab = 'chat'; render(); } }, '💬 Hablar con el supervisor'),
+    h('button', { class: 'btn accent', onclick: () => { S.chatOpen = true; chatBubble(m); } }, '💬 Hablar con el supervisor'),
     inbox().length ? h('button', { class: 'btn', onclick: async () => { const r = await distribute(inbox()); toast(`El supervisor repartió ${r.length} pendiente(s)`, 'ok'); } }, `🤖 Repartir ${inbox().length} pendiente(s)`) : null);
   if (tab === 'data') return dataCenter(m);
-  if (tab === 'chat') return chatPanel(m);
   if (tab === 'material') return materialPanel(m);
   if (tab === 'org') {
     const ceoM = members.find(x => x.ceo), bossOf = x => x.ceo ? null : (members.some(y => y.id === x.reports_to) ? x.reports_to : ceoM?.id);
@@ -1046,8 +1088,7 @@ function renderOffice(m) {
   const elemBar = ro ? null : h('div', { class: 'of-elems' }, h('button', { class: 'btn', onclick: e => menu(e.currentTarget, CATALOG.map(([k, l]) => ({ label: l, run: () => { if (!S.oEdit) { S.oEdit = true; render(); setTimeout(() => OF?.add(k), 600); } else OF?.add(k); } }))) }, h('span', { svg: I.plus }), 'Elemento'), editBtn,
     S.oEdit ? h('button', { class: 'btn ghost', onclick: async () => { if (await confirmBox('Restablecer', '¿Volver a la decoración original de la oficina?', 'Restablecer')) OF?.resetItems(); } }, 'Restablecer') : null, selBox);
   const ctl = h('div', { class: 'of-ctl' }, h('button', { class: 'btn', 'aria-label': 'Acercar', onclick: () => OF?.zoom(1.2) }, '+'), h('button', { class: 'btn', 'aria-label': 'Alejar', onclick: () => OF?.zoom(0.83) }, '−'), h('button', { class: 'btn', onclick: () => OF?.reset() }, 'Centrar'));
-  const chatFab = h('button', { class: 'chat-fab', onclick: () => { const ex = document.querySelector('.chat-float'); if (ex) return ex.remove(); const box = h('div', { class: 'chat-float' }, h('button', { class: 'icon-btn chat-x', svg: I.x, 'aria-label': 'Cerrar', onclick: () => box.remove() })); document.body.append(box); chatPanel(box); } }, '💬 Supervisor');
-  m.append(chatFab, h('div', { class: 'toolbar' }, actions, elemBar, h('span', { class: 'muted' }, S.oEdit ? 'Modo edición: arrastra un elemento para moverlo · tócalo para rotarlo o eliminarlo' : 'Arrastra para girar · rueda o pellizco para zoom · Shift + arrastrar para mover · clic en una persona para ver sus tareas')), h('div', { class: 'of-stage' + (S.oEdit ? ' editing' : '') }, wrap, ctl));
+  m.append(h('div', { class: 'toolbar' }, actions, elemBar, h('span', { class: 'muted' }, S.oEdit ? 'Modo edición: arrastra un elemento para moverlo · tócalo para rotarlo o eliminarlo' : 'Arrastra para girar · rueda o pellizco para zoom · Shift + arrastrar para mover · clic en una persona para ver sus tareas')), h('div', { class: 'of-stage' + (S.oEdit ? ' editing' : '') }, wrap, ctl));
   loadLib('lib/three.min.js', 'THREE').then(() => { wrap.querySelector('.of-load')?.remove(); try { office3D(wrap, members); } catch (e) { console.error('office3D', e); wrap.replaceChildren(h('p', { class: 'muted', style: 'padding:20px' }, 'Tu navegador no pudo mostrar la oficina 3D. Usa la pestaña «Equipo y tareas».')); } })
     .catch(() => wrap.replaceChildren(h('p', { class: 'muted', style: 'padding:20px' }, 'No se pudo cargar el motor 3D.')));
 }

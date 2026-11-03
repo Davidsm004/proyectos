@@ -704,8 +704,10 @@ tr.drop-on td{background:rgba(0,128,232,.1)!important}
 .tk.done .tk-t span{text-decoration:line-through;color:var(--g600)}
 .tk input[type=range]{width:100%;accent-color:var(--blue)}
 .tk .bar{margin:4px 0}
-.chat-fab{position:fixed;left:16px;bottom:16px;z-index:120;border:0;border-radius:999px;padding:12px 18px;font-weight:700;color:#fff;background:linear-gradient(120deg,var(--blue),var(--blue-d));box-shadow:0 10px 24px rgba(0,63,249,.35);cursor:pointer}
-.chat-float{position:fixed;left:16px;bottom:72px;z-index:330;width:min(400px,calc(100vw - 32px))}
+.chat-fab{position:fixed;right:20px;bottom:20px;z-index:340;border:0;border-radius:50%;width:62px;height:62px;font-size:26px;display:grid;place-items:center;padding:0;font-weight:700;color:#fff;background:linear-gradient(120deg,var(--blue),var(--blue-d));box-shadow:0 10px 24px rgba(0,63,249,.35);cursor:pointer}
+.chat-float{position:fixed;right:20px;bottom:94px;z-index:340;width:min(400px,calc(100vw - 32px));animation:slide .2s}
 .chat-float .chat{height:min(60vh,520px);box-shadow:0 20px 50px rgba(0,30,90,.35)}
 .chat-float .chat-x{position:absolute;right:8px;top:10px;z-index:2}
-@media (max-width:760px){.chat-fab{bottom:84px}.chat-float{bottom:140px}}
+@media (max-width:760px){.chat-fab{bottom:84px;right:16px}.chat-float{bottom:156px;right:16px}}
+.chat-fab.open{font-size:20px;background:var(--g800)}
+#reminders{right:96px}@media (max-width:760px){#reminders{right:16px;bottom:160px}}
