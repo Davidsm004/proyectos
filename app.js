@@ -524,6 +524,7 @@ const ROLES_SUG = ['CEO', 'Gerente de proyectos', 'PMO', 'Analista de datos', 'D
 const team = () => myCols().slice().sort((a, b) => (b.ceo ? 1 : 0) - (a.ceo ? 1 : 0) || byPos(a, b));
 async function ensureCEO() {
   if (!canEdit() || S._ceoChecked) return; S._ceoChecked = true;
+  if (!myCols().some(c => c.supervisor)) { const [sv] = await q(sb.from('kcols').insert({ name: 'Sofía', role: 'Supervisora', supervisor: true, color: '#003FF9', hair: 'cola', hairColor: 'castano', skin: 'moreno', expr: 'sonrisa', position: 1, author: S.user.id }).select()); S.kcols.push(sv); render(); }
   if (myCols().some(c => c.ceo)) return;
   const name = (S.profile.email || 'Yo').replace(/\d+$/, '') || 'Yo';
   const ex = myCols().find(c => norm(c.name) === norm(name) || norm(c.name) === 'david' || norm(c.name).startsWith('david solis'));
@@ -545,10 +546,12 @@ async function memberForm(c) {
     { name: 'expr', label: 'Expresión', type: 'select', value: c?.expr || 'sonrisa', options: [{ value: 'sonrisa', label: 'Sonriente' }, { value: 'serio', label: 'Serio' }] },
     { name: 'glasses', label: 'Lentes', type: 'select', value: c?.glasses ? 'si' : 'no', options: [{ value: 'no', label: 'No' }, { value: 'si', label: 'Sí' }] },
     { name: 'beard', label: 'Barba', type: 'select', value: c?.beard ? 'si' : 'no', options: [{ value: 'no', label: 'No' }, { value: 'si', label: 'Sí' }] },
+    c?.ceo ? null : { name: 'sup', label: '¿Es supervisor/a?', type: 'select', value: c?.supervisor ? 'si' : 'no', options: [{ value: 'no', label: 'No' }, { value: 'si', label: 'Sí: da instrucciones y reparte tareas' }] },
     c?.ceo ? null : { name: 'boss', label: 'Reporta a', type: 'select', value: c?.reports_to || (myCols().find(x => x.ceo)?.id || ''), options: myCols().filter(x => x.id !== c?.id).map(x => ({ value: x.id, label: x.name + ' · ' + (x.role || 'Sin rol') })) }].filter(Boolean), c ? 'Guardar' : 'Agregar');
   if (!r) return;
   const v = { name: r.name.trim(), role: r.role.trim() || (c?.ceo ? 'CEO' : 'Sin rol'), traits: r.traits.split(',').map(s => s.trim()).filter(Boolean), strengths: r.strengths.trim(), quote: r.quote.trim(), color: r.color, hair: r.hair, skin: r.skin, hairColor: r.hairColor, expr: r.expr, glasses: r.glasses === 'si', beard: r.beard === 'si' };
   if (r.boss !== undefined && !c?.ceo) v.reports_to = r.boss || null;
+  if (r.sup !== undefined && !c?.ceo) { v.supervisor = r.sup === 'si'; if (v.supervisor) myCols().filter(x => x.supervisor && x.id !== c?.id).forEach(x => { x.supervisor = false; q(sb.from('kcols').update({ supervisor: false }).eq('id', x.id)); }); }
   if (c) { Object.assign(c, v); render(); await q(sb.from('kcols').update(v).eq('id', c.id)); toast('Integrante actualizado', 'ok'); }
   else { const [row] = await q(sb.from('kcols').insert({ ...v, position: nextPos(myCols()), author: S.user.id }).select()); S.kcols.push(row); render(); toast('Integrante agregado a la oficina', 'ok'); }
 }
@@ -645,15 +648,16 @@ function office3D(wrap, members) {
     for (let x = -w / 2 + 1; x < w / 2; x += 2) for (let z = -d / 2 + 1; z < d / 2; z += 2) { mm.setPosition(x0 + x, y, z0 + z); im.setMatrixAt(i++, mm); } im.count = i; p.add(im); };
   // base, piso y paredes con detalles
   box(FW + 1, 1.2, FD + 1, dark ? 0x1b2133 : 0x2f333c, 0, -0.65, 0); box(FW, 0.3, FD, dark ? 0x5a4632 : 0xd2a676, 0, 0.1, 0); studs(FW, FD, dark ? 0x634c37 : 0xdcb185, 0.31, 0, 0);
-  const wallC = dark ? 0x2a3044 : 0xf2f1f6; box(FW, 7, 0.4, wallC, 0, 3.6, -FD / 2); box(0.4, 7, FD, wallC, -FW / 2, 3.6, 0);
-  box(FW, 0.5, 0.45, dark ? 0x3a4154 : 0xc9cacf, 0, 0.5, -FD / 2 + 0.05); box(0.45, 0.5, FD, dark ? 0x3a4154 : 0xc9cacf, -FW / 2 + 0.05, 0.5, 0);
-  const glass = new T.MeshStandardMaterial({ color: 0x9fd8ff, transparent: true, opacity: dark ? 0.25 : 0.32, roughness: 0.1 });
-  for (let z = -FD / 2 + 3; z < FD / 2 - 2; z += 4.5) { box(0.45, 3.2, 3, glass, -FW / 2, 4.2, z); box(0.5, 0.15, 3.2, 0x84858a, -FW / 2, 2.55, z); }
-  for (let x = -FW / 2 + 3; x < -3; x += 4.5) { box(3, 3.2, 0.45, glass, x, 4.2, -FD / 2); box(3.2, 0.15, 0.5, 0x84858a, x, 2.55, -FD / 2); }
+  // paredes de vidrio con marcos
+  const glass = new T.MeshStandardMaterial({ color: 0xa8dcff, transparent: true, opacity: dark ? 0.22 : 0.28, roughness: 0.05, metalness: 0.1 }), frame = dark ? 0x3a4154 : 0x84858a;
+  box(FW, 6.6, 0.12, glass, 0, 3.6, -FD / 2); box(0.12, 6.6, FD, glass, -FW / 2, 3.6, 0);
+  box(FW, 0.3, 0.3, frame, 0, 0.45, -FD / 2); box(FW, 0.25, 0.3, frame, 0, 6.95, -FD / 2); box(0.3, 0.3, FD, frame, -FW / 2, 0.45, 0); box(0.3, 0.25, FD, frame, -FW / 2, 6.95, 0);
+  for (let x = -FW / 2; x <= FW / 2; x += 3.75) box(0.16, 6.6, 0.2, frame, x, 3.6, -FD / 2);
+  for (let z = -FD / 2; z <= FD / 2; z += 3.75) box(0.2, 6.6, 0.16, frame, -FW / 2, 3.6, z);
+  box(FW, 0.08, 0.18, frame, 0, 2.6, -FD / 2); box(0.18, 0.08, FD, frame, -FW / 2, 2.6, 0);
   new T.TextureLoader().load('logo.png', tx => { const p = new T.Mesh(new T.PlaneGeometry(6, 6 * 85 / 527), new T.MeshBasicMaterial({ map: tx, transparent: true })); p.position.set(4.5, 5.6, -FD / 2 + 0.22); scene.add(p); });
   box(8, 0.12, 0.3, 0xed7f32, 4.5, 4.5, -FD / 2 + 0.25);
   // cuadros en la pared y reloj con manecillas
-  [[-1.5, 0x0080e8], [12.5, 0x9648d9]].forEach(([x, c]) => { box(2.2, 1.6, 0.1, 0xffffff, x, 5, -FD / 2 + 0.25); box(1.9, 1.3, 0.05, c, x, 5, -FD / 2 + 0.32); });
   const clk = cyl(0.8, 0.12, 0xffffff, 9, 5.4, -FD / 2 + 0.28); clk.rotation.x = Math.PI / 2; const hand1 = box(0.08, 0.6, 0.04, 0x2f333c, 9, 5.4, -FD / 2 + 0.38), hand2 = box(0.06, 0.45, 0.04, 0xed7f32, 9, 5.4, -FD / 2 + 0.4);
   [hand1, hand2].forEach(hd => { hd.geometry.translate(0, 0.25, 0); });
   // lámparas colgantes
@@ -730,17 +734,42 @@ function office3D(wrap, members) {
     if (m.ceo) { const cr = cyl(0.3, 0.2, M(0xf3bb40, { emissive: new T.Color(0x553300), metalness: 0.4 }), 0, hy + 0.32, 0, head, 8); }
     root.scale.setScalar(0.85); root.traverse(o => { o.userData.member = m.id; }); scene.add(root);
     const bubble = h('div', { class: 'of-bubble hidden' }); wrap.append(bubble);
-    return { m, root, body, hipL, hipR, shL, shR, head, bubble };
+    const paper = box(0.5, 0.04, 0.65, 0xffffff, 0, -0.95, 0.25, shR); paper.visible = false;
+    if (m.supervisor) { box(0.55, 0.05, 0.75, 0x7e3628, 0, -0.95, 0.3, shL); box(0.45, 0.06, 0.6, 0xffffff, 0, -0.92, 0.3, shL); cyl(0.5, 0.06, 0x2f333c, 0, 0.42, 0, head, 20); }
+    return { m, root, body, hipL, hipR, shL, shR, head, bubble, paper };
   };
   const pois = () => itemObjs.filter(g => WALK_TO.includes(g.userData.item.type)).map(g => { const v = new T.Vector3(); g.getWorldPosition(v); const r = g.rotation.y; return new T.Vector3(v.x + Math.sin(r) * 1.6, 0, v.z + Math.cos(r) * 1.6); });
   const SAY = { printer: 'Imprimiendo…', rack: 'Revisando servidores', coffee: '☕ Café', cooler: '💧 Agua', sofa: 'Pausa activa', shelf: 'Buscando un libro', table: 'Reunión rápida', board: 'Planeando', cabinet: 'Buscando archivos' };
   members.forEach(m => { const d = deskFor.get(m.id); if (!d) return; const f = figure(m); f.d = d; f.state = 'sit'; f.timer = 4 + Math.random() * 10; f.path = []; f.root.position.copy(d.seat); figs.push(f); });
   const setSit = (f, on) => { f.body.position.y = on ? -0.55 : 0; f.hipL.rotation.x = f.hipR.rotation.x = on ? -Math.PI / 2 : 0; };
-  figs.forEach(f => { setSit(f, true); f.root.rotation.y = 0; });
+  figs.forEach(f => { setSit(f, true); f.root.rotation.y = 0; f.sub = 'type'; f.subT = Math.random() * 4; if (f.m.supervisor) f.timer = 2; });
   const nearPoi = () => { const ps = pois(); if (!ps.length) return null; const i = Math.floor(Math.random() * ps.length), g = itemObjs.filter(o => WALK_TO.includes(o.userData.item.type))[i]; return { p: ps[i], type: g.userData.item.type }; };
-  const startWalk = f => { const t = Math.random() < 0.25 && figs.length > 1 ? (() => { const o = figs[Math.floor(Math.random() * figs.length)]; return o === f ? null : { p: new T.Vector3(o.d.seat.x + 1.2, 0, o.d.aisle + 0.2), type: 'colega', who: o.m.name.split(' ')[0] }; })() : nearPoi();
-    if (!t) { f.timer = 5; return; } const s = f.d.seat; f.goal = t; f.path = [new T.Vector3(s.x, 0, f.d.aisle), new T.Vector3(t.p.x, 0, f.d.aisle), t.p.clone()]; f.state = 'walk'; setSit(f, false); };
-  const backWalk = f => { const s = f.d.seat; f.path = [new T.Vector3(f.root.position.x, 0, f.d.aisle), new T.Vector3(s.x, 0, f.d.aisle), s.clone()]; f.state = 'return'; setSit(f, false); f.bubble.classList.add('hidden'); };
+  const topTask = m => cardsOf(m.id).filter(k => k.is_task && !k.done).sort((x, y) => String(x.due || '9').localeCompare(String(y.due || '9')))[0];
+  const say = (f, txt, ms) => { f.bubble.textContent = txt; f.bubble.classList.toggle('hidden', !txt); f.sayUntil = ms ? tAcc + ms / 1000 : 0; };
+  const sup = () => figs.find(x => x.m.supervisor);
+  const TALK = ['¿Cómo vas con eso?', 'Te paso el archivo', 'Listo, avanzo', '¿Lo revisamos juntos?', 'Ya casi termino', '¡Buena idea!', 'Hagamos la llamada'];
+  const goTo = (f, p, goal) => { const s = f.root.position; f.goal = goal; f.path = [new T.Vector3(s.x, 0, f.d.aisle), new T.Vector3(p.x, 0, f.d.aisle), p.clone()]; f.state = 'walk'; setSit(f, false); };
+  const startWalk = f => {
+    if (f.m.supervisor) { // el supervisor recorre los puestos dando instrucciones
+      const q2 = (S.supQ || []).shift(), list = figs.filter(o => o !== f && !o.m.ceo), o = q2 ? figs.find(x => x.m.id === q2.id) : list[Math.floor(Math.random() * list.length)];
+      if (!o) { f.timer = 4; return; } const k = topTask(o.m);
+      const msg = q2?.text || (k ? `${String(o.m.name || '').split(' ')[0]}, prioriza «${String(k.title || '').slice(0, 34)}»` + (k.due ? ' · vence ' + new Date(k.due + 'T00:00').toLocaleDateString('es-CR', { day: 'numeric', month: 'short' }) : '') : `${String(o.m.name || '').split(' ')[0]}, ¡buen trabajo! sigue así`);
+      return goTo(f, new T.Vector3(o.d.seat.x + 1.1, 0, o.d.seat.z - 0.9), { type: 'instr', who: o, msg }); }
+    const r = Math.random(), k = topTask(f.m), sv = sup();
+    if (sv && sv !== f && sv.state === 'sit' && k && Math.random() < 0.3) return goTo(f, new T.Vector3(sv.d.seat.x + 1.1, 0, sv.d.seat.z - 0.9), { type: 'ask', who: sv, doc: k.title });
+    if (r < 0.3 && k) { const pr = itemObjs.filter(g => g.userData.item.type === 'printer'); if (pr.length) { const g = pr[Math.floor(Math.random() * pr.length)], v = new T.Vector3(); g.getWorldPosition(v); const rr = g.rotation.y; return goTo(f, new T.Vector3(v.x + Math.sin(rr) * 1.6, 0, v.z + Math.cos(rr) * 1.6), { type: 'printer', doc: k.title }); } }
+    if (r < 0.6 && figs.length > 2) { const o = figs.filter(x => x !== f && x.state === 'sit' && !x.m.supervisor)[Math.floor(Math.random() * figs.length)]; if (o) return goTo(f, new T.Vector3(o.d.seat.x + 1.1, 0, o.d.seat.z - 0.9), { type: 'colega', who: o }); }
+    const t = nearPoi(); if (!t) { f.timer = 5; return; } goTo(f, t.p, t); };
+  const backWalk = f => { const s = f.d.seat; f.path = [new T.Vector3(f.root.position.x, 0, f.d.aisle), new T.Vector3(s.x, 0, f.d.aisle), s.clone()]; f.state = 'return';
+    setSit(f, false); if (f.goal?.type === 'printer') { f.paper.visible = true; say(f, '📄 Llevando «' + String(f.goal.doc || '').slice(0, 26) + '»'); } else say(f, ''); };
+  const arrive = f => { const g = f.goal; f.state = 'visit'; f.timer = 4 + Math.random() * 4;
+    if (g.type === 'printer') say(f, '🖨 Imprimiendo «' + String(g.doc || '').slice(0, 26) + '»');
+    else if (g.type === 'instr') { f.timer = 5; say(f, '📋 ' + g.msg); const o = g.who; o.face = f; setTimeout(() => { if (o.bubble) { say(o, '👍 Entendido', 3500); } }, 1800); }
+    else if (g.type === 'ask') { const o = g.who; o.face = f; f.timer = 6; say(f, '❓ ¿Cómo avanzo con «' + String(g.doc || '').slice(0, 22) + '»?'); setTimeout(() => say(o, '💡 ' + ['Empieza por lo urgente', 'Pídele los datos a Laura', 'Revísalo conmigo en la tarde', 'Prioriza esa, va primero', 'Usa la plantilla del Material'][Math.floor(Math.random() * 5)], 3500), 2000); }
+    else if (g.type === 'colega') { const o = g.who; o.face = f; say(f, '💬 ' + TALK[Math.floor(Math.random() * TALK.length)]); setTimeout(() => say(o, '💬 ' + TALK[Math.floor(Math.random() * TALK.length)], 3000), 1600); }
+    else say(f, SAY[g.type] || ''); };
+  const atDesk = f => { f.state = 'sit'; f.timer = f.m.supervisor ? 4 + Math.random() * 4 : 12 + Math.random() * 18; if (f.m.supervisor) { f.sub = 'think'; f.subT = 3; say(f, '🗂 Revisando avances del equipo', 3000); } setSit(f, true); f.root.position.copy(f.d.seat); f.root.rotation.y = 0;
+    if (f.paper.visible) { f.paper.visible = false; box(0.5, 0.06, 0.65, 0xffffff, f.d.seat.x + 0.9, 1.95, f.d.seat.z + 1, scene); } say(f, ''); f.sub = 'type'; f.subT = 3; };
   // etiquetas
   const labels = members.map(m => { const st = memberStats(m); const el = h('button', { class: 'of-label' + (st.late ? ' late' : ''), style: `--c:${m.color}`, title: `${m.name} · ${m.role || 'Sin rol'} · ${st.pend} pendientes` + (st.late ? ` · ${st.late} atrasadas` : ''), onclick: () => openMember(m) },
     h('b', {}, (m.ceo ? '👑 ' : '') + m.name.split(' ')[0]), st.pend ? h('i', {}, st.pend) : null, h('span', {}, m.role || 'Sin rol')); wrap.append(el); return { el, m }; });
@@ -778,15 +807,26 @@ function office3D(wrap, members) {
     hand1.rotation.z = -(now.getHours() % 12 + now.getMinutes() / 60) / 12 * Math.PI * 2; hand2.rotation.z = -now.getMinutes() / 60 * Math.PI * 2;
     itemObjs.forEach(g => { const u = g.userData; if (u.leds) u.leds.forEach((l, i) => { l.material.emissiveIntensity = (Math.sin(tAcc * 6 + i * 1.7) > 0.3) ? 1 : 0.1; }); if (u.blink) u.blink.material.emissiveIntensity = Math.sin(tAcc * 3) > 0 ? 1 : 0.2; if (u.screen) u.screen.material.emissiveIntensity = 0.5 + Math.sin(tAcc * 2) * 0.15; });
     figs.forEach(f => { const pos = f.root.position;
-      if (f.state === 'sit') { f.shL.rotation.x = -1.25 + Math.sin(tAcc * 14 + f.m.id.length) * 0.12; f.shR.rotation.x = -1.25 + Math.cos(tAcc * 13) * 0.12; f.head.rotation.y = Math.sin(tAcc * 0.7 + pos.x) * 0.25; f.root.rotation.y = 0;
-        f.d.screen.material.emissiveIntensity = (dark ? 0.55 : 0.3) + Math.sin(tAcc * 4 + pos.x) * 0.08; f.timer -= dt; if (f.timer <= 0) startWalk(f); }
-      else if (f.state === 'walk' || f.state === 'return') { const tgt = f.path[0]; if (!tgt) { if (f.state === 'walk') { f.state = 'visit'; f.timer = 4 + Math.random() * 5; const sayT = f.goal.type === 'colega' ? 'Hablando con ' + f.goal.who : SAY[f.goal.type] || ''; f.bubble.textContent = sayT; f.bubble.classList.toggle('hidden', !sayT); }
-          else { f.state = 'sit'; f.timer = 10 + Math.random() * 18; setSit(f, true); pos.copy(f.d.seat); } return; }
-        tmp.subVectors(tgt, pos); tmp.y = 0; const dist = tmp.length(), sp = 2.6 * dt;
+      if (f.sayUntil && tAcc > f.sayUntil) { f.sayUntil = 0; if (f.state === 'sit') say(f, ''); }
+      if (f.state === 'sit') {
+        f.subT = (f.subT ?? 3) - dt; if (f.subT <= 0) { f.sub = Math.random() < 0.35 ? 'think' : 'type'; f.subT = 3 + Math.random() * 5; const k = topTask(f.m);
+          if (!f.sayUntil) say(f, f.sub === 'think' ? '💭 ' + (k ? String(k.title || '').slice(0, 28) : 'Pensando…') : (Math.random() < 0.5 && k ? '⌨️ ' + String(k.title || '').slice(0, 28) : ''), f.sub === 'think' ? 3500 : 3000); }
+        if (f.face && f.face.state === 'visit') { f.head.rotation.y = 0.9; } else { f.face = null;
+          if (f.sub === 'think') { f.shR.rotation.x = -2.5; f.shR.rotation.z = 0.35; f.shL.rotation.x = -1.2; f.shL.rotation.z = 0; f.head.rotation.y = Math.sin(tAcc * 0.8) * 0.15; f.head.rotation.z = 0.12; }
+          else { f.shR.rotation.z = 0; f.head.rotation.z = 0; f.shL.rotation.x = -1.25 + Math.sin(tAcc * 18 + pos.x) * 0.14; f.shR.rotation.x = -1.25 + Math.cos(tAcc * 17 + pos.z) * 0.14; f.head.rotation.y = Math.sin(tAcc * 0.7 + pos.x) * 0.2; } }
+        f.root.rotation.y = 0; f.d.screen.material.emissiveIntensity = (dark ? 0.55 : 0.3) + (f.sub === 'type' ? Math.abs(Math.sin(tAcc * 9 + pos.x)) * 0.25 : 0);
+        f.timer -= dt; if (f.timer <= 0) startWalk(f); }
+      else if (f.state === 'walk' || f.state === 'return') { f.shR.rotation.z = 0; f.head.rotation.z = 0; const tgt = f.path[0];
+        if (!tgt) { if (f.state === 'walk') arrive(f); else atDesk(f); return; }
+        tmp.subVectors(tgt, pos); tmp.y = 0; const dist = tmp.length(), sp = (f.m.supervisor ? 3 : 2.6) * dt;
         if (dist < sp) { pos.x = tgt.x; pos.z = tgt.z; f.path.shift(); } else { tmp.normalize(); pos.x += tmp.x * sp; pos.z += tmp.z * sp; const ang = Math.atan2(tmp.x, tmp.z); f.root.rotation.y += ((ang - f.root.rotation.y + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 10); }
-        const sw = Math.sin(tAcc * 10) * 0.6; f.hipL.rotation.x = sw; f.hipR.rotation.x = -sw; f.shL.rotation.x = -sw * 0.8; f.shR.rotation.x = sw * 0.8; f.body.position.y = Math.abs(Math.sin(tAcc * 10)) * 0.06; }
-      else if (f.state === 'visit') { f.hipL.rotation.x = f.hipR.rotation.x = 0; f.shL.rotation.x = Math.sin(tAcc * 3) * 0.3; f.shR.rotation.x = -0.4 + Math.sin(tAcc * 2) * 0.2; f.head.rotation.y = Math.sin(tAcc * 1.5) * 0.4; f.timer -= dt; if (f.timer <= 0) backWalk(f); }
-      tmp.copy(pos); tmp.y = 3.9; proj(tmp, f.bubble, -18); });
+        const sw = Math.sin(tAcc * 10) * 0.6; f.hipL.rotation.x = sw; f.hipR.rotation.x = -sw; f.shL.rotation.x = -sw * 0.8; f.shR.rotation.x = f.paper.visible ? -1.1 : sw * 0.8; f.body.position.y = Math.abs(Math.sin(tAcc * 10)) * 0.06; }
+      else if (f.state === 'visit') { f.hipL.rotation.x = f.hipR.rotation.x = 0; const g = f.goal;
+        if (g.who) { tmp.subVectors(g.who.root.position, pos); f.root.rotation.y = Math.atan2(tmp.x, tmp.z); f.shR.rotation.x = -0.6 + Math.sin(tAcc * 4) * 0.4; f.shL.rotation.x = Math.sin(tAcc * 3) * 0.2; }
+        else if (g.type === 'printer') { f.root.rotation.y = Math.PI; f.shL.rotation.x = f.shR.rotation.x = -1 + Math.sin(tAcc * 5) * 0.15; }
+        else { f.shL.rotation.x = Math.sin(tAcc * 3) * 0.3; f.shR.rotation.x = -0.4 + Math.sin(tAcc * 2) * 0.2; }
+        f.head.rotation.y = Math.sin(tAcc * 1.5) * 0.3; f.timer -= dt; if (f.timer <= 0) backWalk(f); }
+      tmp.copy(pos); tmp.y = f.state === 'sit' ? 4.2 : 4.5; proj(tmp, f.bubble, -34); });
     labels.forEach(({ el: le, m }) => { const f = figs.find(x => x.m.id === m.id); if (!f) return; tmp.copy(f.root.position); tmp.y = f.state === 'sit' ? 3.6 : 4.1; proj(tmp, le); });
     renderer.render(scene, cam); };
   setCam(); loop(); window.__ofFigs = figs;
@@ -796,6 +836,78 @@ function office3D(wrap, members) {
     rotate: () => { if (!sel) return; const it = sel.userData.item; it.rot = ((it.rot || 0) + 1) % 4; sel.rotation.y = it.rot * Math.PI / 2; saveItems(); },
     remove: () => { if (!sel) return; scene.remove(sel); itemObjs.splice(itemObjs.indexOf(sel), 1); showSel(null); saveItems(); },
     resetItems: () => { S.settings[officeKey()] = { items: [] }; q(sb.from('settings').upsert({ key: officeKey(), value: { items: [] } })).then(() => render()); } };
+}
+
+/* --- Supervisor: distribución de pendientes y chat --- */
+const supervisorM = () => myCols().find(c => c.supervisor);
+const workers = () => team().filter(c => !c.ceo && !c.supervisor);
+function pickWorker(task) { const ws = workers(); if (!ws.length) return null; const t = norm(task.title + ' ' + (task.body || ''));
+  return ws.map(w => ({ w, s: memberStats(w).pend - ((w.role && norm(w.role).split(/\s+/).some(x => x.length > 3 && t.includes(x))) ? 2 : 0) })).sort((a, b) => a.s - b.s)[0].w; }
+async function distribute(tasks, silent) {
+  const out = [];
+  for (const k of tasks.sort((a, b) => String(a.due || '9').localeCompare(String(b.due || '9')))) { const w = pickWorker(k); if (!w) break; k.col_id = w.id; k.position = nextPos(cardsOf(w.id)); out.push([k, w]);
+    await q(sb.from('kcards').update({ col_id: w.id, position: k.position }).eq('id', k.id)); (S.supQ = S.supQ || []).push({ id: w.id, text: `${w.name.split(' ')[0]}, te asigné «${String(k.title || '').slice(0, 30)}»` }); }
+  if (!silent) render(); return out;
+}
+const inbox = () => { const s = supervisorM(); return s ? cardsOf(s.id).filter(k => k.is_task && !k.done) : []; };
+function parseDue(t) {
+  const n = norm(t), today = new Date(new Date().toDateString()), add = d => iso(new Date(today.getTime() + d * 864e5));
+  if (/pasado manana/.test(n)) return add(2); if (/\bmanana\b/.test(n)) return add(1); if (/\bhoy\b/.test(n)) return add(0);
+  let m = n.match(/en (\d+) dias?/); if (m) return add(+m[1]);
+  const DW = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']; for (let i = 0; i < 7; i++) if (n.includes(DW[i])) return add(((i - today.getDay() + 7) % 7) || 7);
+  m = t.match(/(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/); if (m) return `${m[3] ? (m[3].length === 2 ? '20' + m[3] : m[3]) : today.getFullYear()}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return null;
+}
+const findMember = t => { const n = norm(t); return team().filter(c => !c.ceo).sort((a, b) => b.name.length - a.name.length).find(c => n.includes(norm(c.name)) || n.includes(norm(c.name).split(' ')[0])); };
+const findTask = frag => { const f = norm(frag).trim(); if (f.length < 3) return null; return S.kcards.filter(k => k.is_task && k.author === S.user.id).find(k => norm(k.title).includes(f)); };
+const cleanTitle = s => s.replace(/\s+(a|para)\s+[^,]*$/i, '').replace(/\b(para|el|la)?\s*(hoy|mañana|manana|pasado mañana|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|en \d+ d[ií]as?|\d{1,2}[\/-]\d{1,2}([\/-]\d{2,4})?)\b.*$/i, '').replace(/^[:\-\s«"]+|[»"\s.]+$/g, '').trim();
+async function supervisorReply(text) {
+  const n = norm(text), sm = supervisorM(), ws = workers(), today = new Date(new Date().toDateString());
+  const fmtK = k => `• ${k.title}` + (k.due ? ` (vence ${new Date(k.due + 'T00:00').toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })})` : '');
+  if (!ws.length) return 'Aún no hay personal en la oficina. Agrega integrantes en «Equipo y tareas» y yo me encargo de repartir el trabajo.';
+  if (/^(hola|buen(os|as)|hey)/.test(n) && n.length < 25) return `¡Hola! Soy ${sm?.name || 'tu supervisor'}. Puedo asignar, repartir, reasignar y darte el estado del equipo. Escribe «ayuda» para ver ejemplos.`;
+  if (/ayuda|que puedes|comandos/.test(n)) return 'Puedes pedirme, por ejemplo:\n• «Asigna revisar contrato a Esteban para el viernes»\n• «Crea tarea preparar informe mensual mañana» (yo elijo a quién)\n• «Reparte los pendientes»\n• «Reasigna informe a Laura»\n• «Marca contrato como lista»\n• «¿Qué tiene pendiente Laura?»\n• «¿Quién está atrasado?» · «Resumen» · «¿Quién tiene más carga?»';
+  if (/repart|distribu|balancea/.test(n)) { const ib = inbox(); if (!ib.length) return 'Mi bandeja está vacía: no hay pendientes sin asignar. Si quieres, crea tareas sin responsable y las reparto.'; const r = await distribute(ib); return `Listo, repartí ${r.length} pendiente(s) según la carga de cada uno:\n` + r.map(([k, w]) => `• «${k.title}» → ${w.name}`).join('\n') + '\nVoy a sus puestos a darles la instrucción.'; }
+  if (/atrasad|vencid/.test(n)) { const L = []; ws.concat(sm ? [sm] : []).forEach(w => cardsOf(w.id).filter(k => k.is_task && !k.done && k.due && dOf(k.due) < today).forEach(k => L.push(`• ${w.name}: ${k.title}`))); return L.length ? `Hay ${L.length} tarea(s) atrasada(s):\n` + L.join('\n') + '\n¿Quieres que las reasigne o les dé prioridad?' : 'Nadie tiene tareas atrasadas. 🎉'; }
+  if (/carga|ocupad|libre/.test(n)) { const r = ws.map(w => [w, memberStats(w)]).sort((a, b) => b[1].pend - a[1].pend); return 'Carga actual del equipo:\n' + r.map(([w, s]) => `• ${w.name} (${w.role || 'Sin rol'}): ${s.pend} pendiente(s)` + (s.late ? `, ${s.late} atrasada(s)` : '')).join('\n'); }
+  if (/resumen|como vamos|estado/.test(n) && !findMember(text)) { let p = 0, l = 0, d = 0; ws.forEach(w => { const s = memberStats(w); p += s.pend; l += s.late; d += s.done; }); const top = ws.map(w => [w, memberStats(w).pend]).sort((a, b) => b[1] - a[1])[0];
+    return `Resumen del equipo (${ws.length} personas):\n• ${p} pendientes · ${l} atrasadas · ${d} hechas\n• En mi bandeja sin asignar: ${inbox().length}\n• Más cargado: ${top[0].name} (${top[1]})`; }
+  let mt = text.match(/^(?:re)?asign[ae]\s+(.+?)\s+a\s+([^,]+?)(?:\s+para\s+.*)?$/i);
+  if (mt && /^re/i.test(text.trim())) { const k = findTask(mt[1]), w = findMember(mt[2]); if (!k) return `No encontré una tarea que contenga «${mt[1]}».`; if (!w) return `No encontré a «${mt[2]}» en la oficina.`; await setCard(k, { col_id: w.id, position: nextPos(cardsOf(w.id)) }); (S.supQ = S.supQ || []).push({ id: w.id, text: `${w.name.split(' ')[0]}, ahora te toca «${String(k.title || '').slice(0, 30)}»` }); return `Hecho: «${k.title}» ahora es de ${w.name}.`; }
+  if (/^(asigna|asignale|crea|nueva|agrega|tarea)/.test(n)) {
+    const w = findMember(text), due = parseDue(text); let title = text.replace(/^(asígnale|asignale|asigna|crea( una)?( tarea)?|nueva tarea|agrega( una)?( tarea)?|tarea)\s*:?\s*/i, '');
+    if (w) title = title.replace(new RegExp('\\s+a\\s+' + w.name.split(' ')[0] + '.*$', 'i'), '').replace(new RegExp('\\s+para\\s+' + w.name.split(' ')[0] + '.*$', 'i'), ''); title = cleanTitle(title) || title.trim();
+    if (!title) return 'Dime qué tarea quieres crear. Ej.: «Asigna revisar contrato a Esteban para el viernes».';
+    const target = w || pickWorker({ title }); const [row] = await q(sb.from('kcards').insert({ title: title.charAt(0).toUpperCase() + title.slice(1), body: 'Asignada por el supervisor desde el chat', col_id: target.id, due, prio: /urgente|prioridad alta|ya mismo/.test(n) ? 'alta' : 'media', done: false, is_task: true, from: 'chat', position: nextPos(cardsOf(target.id)), author: S.user.id }).select()); S.kcards.push(row);
+    (S.supQ = S.supQ || []).push({ id: target.id, text: `${target.name.split(' ')[0]}, nueva tarea: «${row.title.slice(0, 30)}»` }); render();
+    return `Asignada «${row.title}» a ${target.name}` + (w ? '' : ` (tenía menos carga)`) + (due ? `, para el ${new Date(due + 'T00:00').toLocaleDateString('es-CR', { weekday: 'long', day: 'numeric', month: 'short' })}` : '') + '. Ya voy a darle la instrucción.'; }
+  if (/marca|complet|termin|lista|hecha/.test(n)) { const frag = text.replace(/^(marca|completa|termina)\s*/i, '').replace(/\s+como\s+.*$/i, ''); const k = findTask(frag); if (k) { await setCard(k, { done: true }); return `Marcada como hecha: «${k.title}». ✅`; } }
+  const w = findMember(text); if (w) { const ks = cardsOf(w.id).filter(k => k.is_task && !k.done); return ks.length ? `${w.name} (${w.role || 'Sin rol'}) tiene ${ks.length} pendiente(s):\n` + ks.slice(0, 10).map(fmtK).join('\n') : `${w.name} no tiene pendientes. ¿Le asigno algo?`; }
+  return 'No entendí del todo 🤔. Prueba con: «Asigna [tarea] a [persona] para [fecha]», «Reparte los pendientes», «¿Quién está atrasado?» o escribe «ayuda».';
+}
+function chatPanel(m) {
+  const key = 'chat:' + S.user.id, hist = () => S.settings[key] || [], sm = supervisorM();
+  const log = h('div', { class: 'chat-log', id: 'chat-log' }), inp = h('textarea', { class: 'input', rows: 1, placeholder: 'Escríbele al supervisor… (ej.: Asigna revisar contrato a Esteban para el viernes)', 'aria-label': 'Mensaje' });
+  const draw = () => { log.replaceChildren(...(hist().length ? hist() : [{ from: 'sup', text: `Hola, soy ${sm?.name || 'tu supervisor'}. Dime qué necesitas y lo reparto entre el equipo. Escribe «ayuda» para ver ejemplos.`, t: new Date().toISOString() }]).map(x => h('div', { class: 'msg ' + x.from },
+    x.from === 'sup' ? h('span', { class: 'of-avatar', style: `--c:${sm?.color || '#003FF9'}` }, h('span', {}, initials(sm?.name || 'S'))) : null, h('div', { class: 'bub' }, h('p', {}, x.text), h('small', {}, new Date(x.t).toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit' }))))));
+    log.scrollTop = log.scrollHeight; };
+  const save = arr => { S.settings[key] = arr.slice(-200); q(sb.from('settings').upsert({ key, value: S.settings[key] })).catch(() => {}); };
+  const send = async txt => { txt = (txt || inp.value).trim(); if (!txt) return; inp.value = ''; const a = hist().concat({ from: 'me', text: txt, t: new Date().toISOString() }); S.settings[key] = a; draw();
+    const typing = h('div', { class: 'msg sup typing' }, h('div', { class: 'bub' }, h('p', {}, 'Escribiendo…'))); log.append(typing); log.scrollTop = log.scrollHeight;
+    let r; try { r = await supervisorReply(txt); } catch (e) { r = 'Tuve un problema: ' + e.message; } await new Promise(ok => setTimeout(ok, 500));
+    save(hist().concat({ from: 'sup', text: r, t: new Date().toISOString() })); if (document.contains(log)) draw(); };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  const chips = ['Resumen', '¿Quién está atrasado?', 'Reparte los pendientes', '¿Quién tiene más carga?', 'Ayuda'];
+  m.append(h('section', { class: 'chat card' }, h('header', { class: 'chat-head' }, h('span', { class: 'of-avatar', style: `--c:${sm?.color || '#003FF9'}` }, h('span', {}, initials(sm?.name || 'S'))), h('div', {}, h('b', {}, sm?.name || 'Supervisor'), h('small', { class: 'muted' }, `Supervisor · ${inbox().length} en bandeja`)),
+      h('button', { class: 'btn ghost', style: 'margin-left:auto', onclick: async () => { if (await confirmBox('Borrar conversación', '¿Borrar el historial del chat?', 'Borrar')) { save([]); draw(); } } }, 'Limpiar')), log,
+    h('div', { class: 'chat-chips' }, chips.map(c => h('button', { class: 'ktag', onclick: () => send(c) }, c))),
+    canEdit() ? h('div', { class: 'chat-in' }, inp, h('button', { class: 'btn primary', onclick: () => send() }, 'Enviar')) : h('p', { class: 'muted' }, 'Tu rol es de solo lectura.')));
+  draw();
+}
+function materialPanel(m) {
+  const id = 'mat-' + S.user.id, body = h('div', {});
+  m.append(h('section', { class: 'card' }, h('h2', {}, '📁 Material'), h('p', { class: 'muted' }, 'Sube presentaciones, maquetas HTML, PDF, Word, Excel e imágenes para el equipo. Puedes verlos aquí mismo o descargarlos.'), body));
+  drawFiles({ id }, body, () => render());
 }
 
 /* --- Centro de datos: subir bases y generar tareas --- */
@@ -819,7 +931,7 @@ async function dataCenter(m) {
     if (rows.length < 2) return toast('La base no tiene filas de datos', 'err');
     const head = rows[0].map((x, i) => x || 'Columna ' + (i + 1)), data = rows.slice(1).filter(r => r.some(x => String(x).trim()));
     const sel = (id, label, guess, opt) => h('div', { class: 'field' }, h('label', { for: id }, label), h('select', { class: 'input', id }, opt ? h('option', { value: '' }, '— Ninguna —') : null, head.map((x, i) => h('option', { value: i, selected: String(i) === guess }, x))));
-    const tm = team(), defWho = h('select', { class: 'input', id: 'dc-def' }, tm.map(x => h('option', { value: x.id }, `${x.name} · ${x.role || 'Sin rol'}`)));
+    const tm = team(), defWho = h('select', { class: 'input', id: 'dc-def' }, h('option', { value: '__auto' }, '🤖 Que el supervisor lo reparta según la carga'), tm.map(x => h('option', { value: x.id }, `${x.name} · ${x.role || 'Sin rol'}`)));
     const colsSel = [sel('dc-title', 'Columna con el nombre de la tarea *', guessCol(head, ['tarea', 'actividad', 'titulo', 'nombre', 'pendiente', 'proyecto', 'task']) || '0'),
       sel('dc-who', 'Columna del responsable', guessCol(head, ['responsable', 'encargado', 'asignado', 'owner', 'persona']), true),
       sel('dc-due', 'Columna de fecha límite', guessCol(head, ['fecha', 'vence', 'limite', 'entrega', 'due']), true),
@@ -837,7 +949,7 @@ async function dataCenter(m) {
             let col = null; const wn = wi !== '' ? String(r[wi] ?? '').trim() : '';
             if (wn) { col = byName.get(norm(wn)) || [...byName.values()].find(x => norm(x.name).includes(norm(wn)) || norm(wn).includes(norm(x.name)));
               if (!col && mk) { [col] = await q(sb.from('kcols').insert({ name: wn, role: 'Sin rol', color: PALETTE[myCols().length % PALETTE.length], position: nextPos(myCols()), author: S.user.id }).select()); S.kcols.push(col); byName.set(norm(wn), col); } }
-            col = col || S.kcols.find(x => x.id === defWho.value);
+            col = col || (defWho.value === '__auto' ? pickWorker({ title }) : null) || S.kcols.find(x => x.id === defWho.value) || supervisorM();
             const pr = pi !== '' ? norm(r[pi]) : '', due = di !== '' ? fromText({ type: 'date' }, r[di]) : null;
             rowsOut.push({ title: title.slice(0, 200), body: de !== '' ? String(r[de] ?? '') : '', col_id: col.id, due, prio: pr.startsWith('a') || pr.startsWith('h') ? 'alta' : pr.startsWith('b') || pr.startsWith('l') ? 'baja' : 'media', done: false, is_task: true, from: 'data', position: nextPos(cardsOf(col.id)) + rowsOut.length, author: S.user.id }); }
           if (!rowsOut.length) { e.currentTarget.disabled = false; return toast('No se encontraron tareas en esa columna', 'err'); }
@@ -856,11 +968,15 @@ async function dataCenter(m) {
 function renderOffice(m) {
   ensureCEO();
   const tab = S.otab || 'office', ro = !canEdit(), members = team();
-  const tabs = h('div', { class: 'seg', role: 'tablist' }, [['office', '🏢 Oficina'], ['team', '👥 Equipo y tareas'], ['org', '🧭 Organigrama'], ['data', '🗄 Centro de datos']].map(([k, l]) => h('button', { class: tab === k ? 'on' : '', role: 'tab', onclick: () => { S.otab = k; render(); } }, l)));
+  const tabs = h('div', { class: 'seg', role: 'tablist' }, [['office', '🏢 Oficina'], ['chat', '💬 Supervisor'], ['team', '👥 Equipo y tareas'], ['org', '🧭 Organigrama'], ['material', '📁 Material'], ['data', '🗄 Centro de datos']].map(([k, l]) => h('button', { class: tab === k ? 'on' : '', role: 'tab', onclick: () => { S.otab = k; render(); } }, l)));
   m.replaceChildren(h('div', { class: 'page-head hero' }, h('div', {}, h('h1', {}, 'Mi oficina'), h('p', {}, 'Tu equipo, sus roles y sus tareas · tú eres el CEO 👑')), tabs));
   const actions = ro ? null : h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('button', { class: 'btn primary', id: 'of-add', onclick: () => memberForm() }, h('span', { svg: I.plus }), 'Integrante'),
-    h('button', { class: 'btn', onclick: () => { const c = members[0]; if (c) taskForm(c); } }, h('span', { svg: I.plus }), 'Asignar tarea'));
+    h('button', { class: 'btn', onclick: () => { const c = members[0]; if (c) taskForm(c); } }, h('span', { svg: I.plus }), 'Asignar tarea'),
+    h('button', { class: 'btn accent', onclick: () => { S.otab = 'chat'; render(); } }, '💬 Hablar con el supervisor'),
+    inbox().length ? h('button', { class: 'btn', onclick: async () => { const r = await distribute(inbox()); toast(`El supervisor repartió ${r.length} pendiente(s)`, 'ok'); } }, `🤖 Repartir ${inbox().length} pendiente(s)`) : null);
   if (tab === 'data') return dataCenter(m);
+  if (tab === 'chat') return chatPanel(m);
+  if (tab === 'material') return materialPanel(m);
   if (tab === 'org') {
     const ceoM = members.find(x => x.ceo), bossOf = x => x.ceo ? null : (members.some(y => y.id === x.reports_to) ? x.reports_to : ceoM?.id);
     const isUnder = (id, anc) => { let cur = members.find(x => x.id === id), n = 0; while (cur && n++ < 50) { const b = bossOf(cur); if (b === anc) return true; cur = members.find(x => x.id === b); } return false; };
