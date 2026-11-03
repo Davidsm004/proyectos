@@ -538,10 +538,17 @@ async function memberForm(c) {
     { name: 'traits', label: 'Personalidad (rasgos separados por coma)', value: (c?.traits || []).join(', '), placeholder: 'Analítico, creativo, detallista' },
     { name: 'strengths', label: 'Fortalezas / cómo trabaja mejor', type: 'textarea', value: c?.strengths || '' },
     { name: 'quote', label: 'Frase que lo representa', value: c?.quote || '' },
-    { name: 'color', label: 'Color (túnica / ropa)', type: 'color', value: c?.color || PALETTE[myCols().length % PALETTE.length] },
-    { name: 'hair', label: 'Cabello', type: 'select', value: c?.hair || 'short', options: [{ value: 'short', label: 'Corto' }, { value: 'long', label: 'Largo' }, { value: 'cap', label: 'Gorra' }, { value: 'wizard', label: 'Sombrero de mago' }, { value: 'none', label: 'Sin cabello' }] }], c ? 'Guardar' : 'Agregar');
+    { name: 'color', label: 'Color de la camisa', type: 'color', value: c?.color || PALETTE[myCols().length % PALETTE.length] },
+    { name: 'skin', label: 'Tono de piel', type: 'select', value: c?.skin || 'medio', options: [{ value: 'claro', label: 'Claro' }, { value: 'medio', label: 'Medio' }, { value: 'moreno', label: 'Moreno' }, { value: 'oscuro', label: 'Oscuro' }] },
+    { name: 'hair', label: 'Peinado', type: 'select', value: HAIRS.some(x => x[0] === c?.hair) ? c.hair : 'corto', options: HAIRS.map(([value, label]) => ({ value, label })) },
+    { name: 'hairColor', label: 'Color de cabello', type: 'select', value: c?.hairColor || 'castano', options: [{ value: 'negro', label: 'Negro' }, { value: 'castano', label: 'Castaño' }, { value: 'rubio', label: 'Rubio' }, { value: 'pelirrojo', label: 'Pelirrojo' }, { value: 'gris', label: 'Gris' }] },
+    { name: 'expr', label: 'Expresión', type: 'select', value: c?.expr || 'sonrisa', options: [{ value: 'sonrisa', label: 'Sonriente' }, { value: 'serio', label: 'Serio' }] },
+    { name: 'glasses', label: 'Lentes', type: 'select', value: c?.glasses ? 'si' : 'no', options: [{ value: 'no', label: 'No' }, { value: 'si', label: 'Sí' }] },
+    { name: 'beard', label: 'Barba', type: 'select', value: c?.beard ? 'si' : 'no', options: [{ value: 'no', label: 'No' }, { value: 'si', label: 'Sí' }] },
+    c?.ceo ? null : { name: 'boss', label: 'Reporta a', type: 'select', value: c?.reports_to || (myCols().find(x => x.ceo)?.id || ''), options: myCols().filter(x => x.id !== c?.id).map(x => ({ value: x.id, label: x.name + ' · ' + (x.role || 'Sin rol') })) }].filter(Boolean), c ? 'Guardar' : 'Agregar');
   if (!r) return;
-  const v = { name: r.name.trim(), role: r.role.trim() || (c?.ceo ? 'CEO' : 'Sin rol'), traits: r.traits.split(',').map(s => s.trim()).filter(Boolean), strengths: r.strengths.trim(), quote: r.quote.trim(), color: r.color, hair: r.hair };
+  const v = { name: r.name.trim(), role: r.role.trim() || (c?.ceo ? 'CEO' : 'Sin rol'), traits: r.traits.split(',').map(s => s.trim()).filter(Boolean), strengths: r.strengths.trim(), quote: r.quote.trim(), color: r.color, hair: r.hair, skin: r.skin, hairColor: r.hairColor, expr: r.expr, glasses: r.glasses === 'si', beard: r.beard === 'si' };
+  if (r.boss !== undefined && !c?.ceo) v.reports_to = r.boss || null;
   if (c) { Object.assign(c, v); render(); await q(sb.from('kcols').update(v).eq('id', c.id)); toast('Integrante actualizado', 'ok'); }
   else { const [row] = await q(sb.from('kcols').insert({ ...v, position: nextPos(myCols()), author: S.user.id }).select()); S.kcols.push(row); render(); toast('Integrante agregado a la oficina', 'ok'); }
 }
@@ -589,115 +596,206 @@ function openMember(c) {
   document.body.append(dr);
 }
 
-/* --- escena 3D (Three.js local, sin CDN) --- */
+/* --- escena 3D --- */
 let OF = null;
+/* --- escena 3D viva (Three.js local) --- */
+const SKINS = { claro: '#F6D3B3', medio: '#E0AC7E', moreno: '#B57A4E', oscuro: '#7A4B2E' };
+const HAIRS = [['corto', 'Corto'], ['largo', 'Largo'], ['cola', 'Cola de caballo'], ['rizado', 'Rizado'], ['gorra', 'Gorra'], ['mago', 'Sombrero de mago']];
+const HAIRC = { negro: '#1E1B1A', castano: '#5A3A22', rubio: '#D9A441', pelirrojo: '#A8432B', gris: '#9A9AA0' };
+const CATALOG = [['printer', '🖨 Impresora'], ['rack', '🗄 Rack de datacenter'], ['coffee', '☕ Cafetera'], ['cooler', '💧 Dispensador de agua'], ['sofa', '🛋 Sofá'], ['shelf', '📚 Librero'],
+  ['cabinet', '🗃 Archivero'], ['table', '⚪ Mesa redonda'], ['plant', '🪴 Planta'], ['tree', '🌳 Planta grande'], ['lamp', '💡 Lámpara de pie'], ['rug', '🟪 Alfombra'], ['tv', '📺 Pantalla'], ['beanbag', '🫘 Puf'], ['board', '📋 Pizarra']];
+const WALK_TO = ['printer', 'rack', 'coffee', 'cooler', 'sofa', 'shelf', 'table', 'board', 'cabinet'];
+const officeKey = () => 'office:' + S.user.id;
+function defaultItems(FW, FD) { const L = -FW / 2, R = FW / 2, B = -FD / 2, F = FD / 2;
+  return [['rack', R - 1.2, B + 9, 0], ['rack', R - 1.2, B + 10.4, 0], ['printer', L + 11, B + 1.4, 0], ['coffee', 1.8, B + 1.2, 0], ['cooler', 4.6, B + 1.1, 0], ['shelf', L + 0.9, B + 3, 1],
+    ['rug', R - 5, F - 3.5, 0], ['sofa', R - 5, F - 1.6, 2], ['beanbag', R - 7.2, F - 4.2, 0], ['table', R - 4.2, F - 4.4, 0], ['lamp', R - 1.2, F - 1.2, 0], ['tree', L + 1.2, F - 1.2, 0], ['plant', -1.5, B + 1.2, 0],
+    ['plant', R - 1.2, B + 6.6, 0], ['cabinet', L + 0.8, B + 6.2, 1], ['cabinet', L + 0.8, B + 7.4, 1], ['board', L + 0.6, B + 10.5, 1], ['plant', L + 9.5, F - 1, 0], ['lamp', L + 9.5, B + 1.2, 0]]
+    .map(([type, x, z, rot]) => ({ id: uid(), type, x, z, rot })); }
+function faceTex(T, m) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 160; const g = cv.getContext('2d'), sk = SKINS[m.skin] || SKINS.medio;
+  g.fillStyle = sk; g.fillRect(0, 0, 512, 160); const cx = 256;
+  g.fillStyle = '#1b1b1b'; [[cx - 30], [cx + 30]].forEach(([x]) => { g.beginPath(); g.ellipse(x, 70, 9, 13, 0, 0, Math.PI * 2); g.fill(); g.fillStyle = '#fff'; g.beginPath(); g.arc(x + 3, 65, 3.5, 0, Math.PI * 2); g.fill(); g.fillStyle = '#1b1b1b'; });
+  g.strokeStyle = HAIRC[m.hairColor] || '#3a2a1e'; g.lineWidth = 5; g.lineCap = 'round'; [[cx - 42, cx - 18], [cx + 18, cx + 42]].forEach(([a, b]) => { g.beginPath(); g.moveTo(a, 48); g.quadraticCurveTo((a + b) / 2, 41, b, 47); g.stroke(); });
+  g.strokeStyle = '#1b1b1b'; g.lineWidth = 5; g.beginPath(); if (m.expr === 'serio') { g.moveTo(cx - 20, 112); g.lineTo(cx + 20, 112); } else { g.arc(cx, 96, 24, 0.2 * Math.PI, 0.8 * Math.PI); } g.stroke();
+  g.fillStyle = 'rgba(230,110,110,.35)'; g.beginPath(); g.arc(cx - 46, 96, 9, 0, Math.PI * 2); g.arc(cx + 46, 96, 9, 0, Math.PI * 2); g.fill();
+  if (m.beard) { g.fillStyle = HAIRC[m.hairColor] || '#3a2a1e'; g.beginPath(); g.moveTo(cx - 52, 92); g.quadraticCurveTo(cx, 170, cx + 52, 92); g.quadraticCurveTo(cx, 128, cx - 52, 92); g.fill(); }
+  if (m.glasses) { g.strokeStyle = '#222'; g.lineWidth = 4; g.strokeRect(cx - 46, 56, 30, 26); g.strokeRect(cx + 16, 56, 30, 26); g.beginPath(); g.moveTo(cx - 16, 66); g.lineTo(cx + 16, 66); g.stroke(); }
+  const t = new T.CanvasTexture(cv); t.anisotropy = 4; return t;
+}
 function office3D(wrap, members) {
   const T = window.THREE; if (!T) return;
   if (OF) { OF.dispose(); OF = null; }
-  const W = wrap.clientWidth || 800, H = wrap.clientHeight || 480, dark = document.documentElement.dataset.theme === 'dark';
+  const W = wrap.clientWidth || 800, H = wrap.clientHeight || 480, dark = document.documentElement.dataset.theme === 'dark', mobile = innerWidth < 760;
   const renderer = new T.WebGLRenderer({ antialias: true, alpha: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(W, H);
-  const mobile = innerWidth < 760; renderer.shadowMap.enabled = !mobile; renderer.shadowMap.type = T.PCFSoftShadowMap;
-  wrap.append(renderer.domElement);
-  const scene = new T.Scene();
-  const cols = 4, rows = Math.max(2, Math.ceil((members.length - 1) / cols)), FW = 28, FD = 14 + rows * 5.5;
-  let zoom = mobile ? 0.8 : 1.45, theta = Math.PI / 4, phi = 0.62; const target = new T.Vector3(0, 0, 0);
+  renderer.shadowMap.enabled = !mobile; renderer.shadowMap.type = T.PCFSoftShadowMap; wrap.append(renderer.domElement);
+  const scene = new T.Scene(), clock = new T.Clock();
+  const others = members.filter(m => !m.ceo), ceo = members.find(m => m.ceo), cols = 4, rows = Math.max(2, Math.ceil(others.length / cols)), FW = 30, FD = 16 + rows * 5.5;
+  let zoom = mobile ? 0.8 : 1.35, theta = Math.PI / 4, phi = 0.62; const target = new T.Vector3(0, 0, 0);
   const cam = new T.OrthographicCamera(-1, 1, 1, -1, -200, 400);
-  const setCam = () => { const a = (wrap.clientWidth || W) / (wrap.clientHeight || H), s = 17 / zoom; cam.left = -s * a; cam.right = s * a; cam.top = s; cam.bottom = -s; cam.updateProjectionMatrix();
+  const setCam = () => { const a = (wrap.clientWidth || W) / (wrap.clientHeight || H), s = 18 / zoom; Object.assign(cam, { left: -s * a, right: s * a, top: s, bottom: -s }); cam.updateProjectionMatrix();
     cam.position.set(target.x + Math.sin(theta) * Math.cos(phi) * 60, target.y + Math.sin(phi) * 60, target.z + Math.cos(theta) * Math.cos(phi) * 60); cam.lookAt(target); };
-  scene.add(new T.HemisphereLight(0xffffff, dark ? 0x223 : 0xbfc8dd, dark ? 0.45 : 0.9));
-  const sun = new T.DirectionalLight(0xffffff, dark ? 0.35 : 0.85); sun.position.set(-20, 40, 25); sun.castShadow = !mobile; sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40 }); scene.add(sun);
-  const M = c => new T.MeshStandardMaterial({ color: c, roughness: 0.55 }), box = (w, hh, d, c, x, y, z, parent = scene) => { const m = new T.Mesh(new T.BoxGeometry(w, hh, d), typeof c === 'object' ? c : M(c)); m.position.set(x, y, z); m.castShadow = m.receiveShadow = !mobile; parent.add(m); return m; };
-  const cyl = (r, hh, c, x, y, z, parent = scene, seg = 16) => { const m = new T.Mesh(new T.CylinderGeometry(r, r, hh, seg), typeof c === 'object' ? c : M(c)); m.position.set(x, y, z); m.castShadow = !mobile; parent.add(m); return m; };
-  // base tipo maqueta + piso con "puntitos"
-  box(FW + 1, 1.2, FD + 1, dark ? 0x1b2133 : 0x2f333c, 0, -0.65, 0);
-  box(FW, 0.3, FD, dark ? 0x5a4632 : 0xc89b6d, 0, 0.1, 0);
-  const studG = new T.CylinderGeometry(0.18, 0.18, 0.12, 10), studs = new T.InstancedMesh(studG, M(dark ? 0x5f4a35 : 0xcfa477), Math.ceil(FW / 2) * Math.ceil(FD / 2)); let si = 0; const dm = new T.Matrix4();
-  for (let x = -FW / 2 + 1; x < FW / 2; x += 2) for (let z = -FD / 2 + 1; z < FD / 2; z += 2) { dm.setPosition(x, 0.31, z); studs.setMatrixAt(si++, dm); } studs.count = si; scene.add(studs);
-  // paredes cortadas (fondo e izquierda) con ventanas
-  const wallC = dark ? 0x2a3044 : 0xeeedf2; box(FW, 7, 0.4, wallC, 0, 3.6, -FD / 2); box(0.4, 7, FD, wallC, -FW / 2, 3.6, 0);
-  const glass = new T.MeshStandardMaterial({ color: 0x9fd8ff, transparent: true, opacity: dark ? 0.25 : 0.35, roughness: 0.1 });
-  for (let z = -FD / 2 + 3; z < FD / 2 - 2; z += 4.5) box(0.45, 3.2, 3, glass, -FW / 2, 4, z);
-  for (let x = -FW / 2 + 3; x < -2; x += 4.5) box(3, 3.2, 0.45, glass, x, 4, -FD / 2);
-  // logo Liberty en la pared
-  new T.TextureLoader().load('logo.png', tx => { const p = new T.Mesh(new T.PlaneGeometry(6, 6 * 85 / 527), new T.MeshBasicMaterial({ map: tx, transparent: true })); p.position.set(4.5, 5.4, -FD / 2 + 0.22); scene.add(p); });
-  box(8, 0.12, 0.3, 0xed7f32, 4.5, 4.3, -FD / 2 + 0.25);
-  // pizarra (seguimientos) y pantalla grande (pipeline) con texto dibujado
+  scene.add(new T.HemisphereLight(0xffffff, dark ? 0x223 : 0xbfc8dd, dark ? 0.5 : 0.95));
+  const sun = new T.DirectionalLight(0xffffff, dark ? 0.35 : 0.8); sun.position.set(-20, 40, 25); sun.castShadow = !mobile; sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40 }); scene.add(sun);
+  const mats = {}, M = (c, o = {}) => { const k = (c && c.isColor ? '#' + c.getHexString() : String(c)) + JSON.stringify(o, (kk, v) => v && v.isColor ? '#' + v.getHexString() : v); return mats[k] || (mats[k] = new T.MeshStandardMaterial({ color: c, roughness: 0.5, ...o })); };
+  const sh = m => { m.castShadow = m.receiveShadow = !mobile; return m; };
+  const box = (w, hh, d, c, x, y, z, p = scene) => { const m = sh(new T.Mesh(new T.BoxGeometry(w, hh, d), typeof c === 'object' ? c : M(c))); m.position.set(x, y, z); p.add(m); return m; };
+  const cyl = (r, hh, c, x, y, z, p = scene, seg = 18, r2) => { const m = sh(new T.Mesh(new T.CylinderGeometry(r, r2 ?? r, hh, seg), typeof c === 'object' ? c : M(c))); m.position.set(x, y, z); p.add(m); return m; };
+  const sph = (r, c, x, y, z, p = scene) => { const m = sh(new T.Mesh(new T.SphereGeometry(r, 14, 12), typeof c === 'object' ? c : M(c))); m.position.set(x, y, z); p.add(m); return m; };
+  const studs = (w, d, c, y, x0, z0, p = scene) => { const n = Math.ceil(w / 2) * Math.ceil(d / 2), im = new T.InstancedMesh(new T.CylinderGeometry(0.17, 0.17, 0.12, 10), M(c), n); let i = 0; const mm = new T.Matrix4();
+    for (let x = -w / 2 + 1; x < w / 2; x += 2) for (let z = -d / 2 + 1; z < d / 2; z += 2) { mm.setPosition(x0 + x, y, z0 + z); im.setMatrixAt(i++, mm); } im.count = i; p.add(im); };
+  // base, piso y paredes con detalles
+  box(FW + 1, 1.2, FD + 1, dark ? 0x1b2133 : 0x2f333c, 0, -0.65, 0); box(FW, 0.3, FD, dark ? 0x5a4632 : 0xd2a676, 0, 0.1, 0); studs(FW, FD, dark ? 0x634c37 : 0xdcb185, 0.31, 0, 0);
+  const wallC = dark ? 0x2a3044 : 0xf2f1f6; box(FW, 7, 0.4, wallC, 0, 3.6, -FD / 2); box(0.4, 7, FD, wallC, -FW / 2, 3.6, 0);
+  box(FW, 0.5, 0.45, dark ? 0x3a4154 : 0xc9cacf, 0, 0.5, -FD / 2 + 0.05); box(0.45, 0.5, FD, dark ? 0x3a4154 : 0xc9cacf, -FW / 2 + 0.05, 0.5, 0);
+  const glass = new T.MeshStandardMaterial({ color: 0x9fd8ff, transparent: true, opacity: dark ? 0.25 : 0.32, roughness: 0.1 });
+  for (let z = -FD / 2 + 3; z < FD / 2 - 2; z += 4.5) { box(0.45, 3.2, 3, glass, -FW / 2, 4.2, z); box(0.5, 0.15, 3.2, 0x84858a, -FW / 2, 2.55, z); }
+  for (let x = -FW / 2 + 3; x < -3; x += 4.5) { box(3, 3.2, 0.45, glass, x, 4.2, -FD / 2); box(3.2, 0.15, 0.5, 0x84858a, x, 2.55, -FD / 2); }
+  new T.TextureLoader().load('logo.png', tx => { const p = new T.Mesh(new T.PlaneGeometry(6, 6 * 85 / 527), new T.MeshBasicMaterial({ map: tx, transparent: true })); p.position.set(4.5, 5.6, -FD / 2 + 0.22); scene.add(p); });
+  box(8, 0.12, 0.3, 0xed7f32, 4.5, 4.5, -FD / 2 + 0.25);
+  // cuadros en la pared y reloj con manecillas
+  [[-1.5, 0x0080e8], [12.5, 0x9648d9]].forEach(([x, c]) => { box(2.2, 1.6, 0.1, 0xffffff, x, 5, -FD / 2 + 0.25); box(1.9, 1.3, 0.05, c, x, 5, -FD / 2 + 0.32); });
+  const clk = cyl(0.8, 0.12, 0xffffff, 9, 5.4, -FD / 2 + 0.28); clk.rotation.x = Math.PI / 2; const hand1 = box(0.08, 0.6, 0.04, 0x2f333c, 9, 5.4, -FD / 2 + 0.38), hand2 = box(0.06, 0.45, 0.04, 0xed7f32, 9, 5.4, -FD / 2 + 0.4);
+  [hand1, hand2].forEach(hd => { hd.geometry.translate(0, 0.25, 0); });
+  // lámparas colgantes
+  for (let x = -6; x <= 10; x += 5.5) { cyl(0.03, 2, 0x2f333c, x, 6.4, -1); cyl(0.15, 0.5, 0x2f333c, x, 5.3, -1, scene, 12, 0.55); const b = sph(0.18, M(0xffe9a8, { emissive: new T.Color(0xffd36b), emissiveIntensity: dark ? 1.2 : 0.4 }), x, 5.05, -1); if (dark) { const l = new T.PointLight(0xffd9a0, 0.8, 9); l.position.set(x, 4.8, -1); scene.add(l); } }
+  // pizarra (seguimientos) y pantalla (pipeline)
   const canvasTex = (w, hh, draw) => { const cv = document.createElement('canvas'); cv.width = w; cv.height = hh; draw(cv.getContext('2d')); const t = new T.CanvasTexture(cv); t.anisotropy = 4; return t; };
-  const segP = S.segs.filter(s => s.author === S.user.id && s.status !== 'done'), segL = segP.filter(s => segState(s) === 'late').length;
-  const wb = new T.Mesh(new T.PlaneGeometry(5, 3), new T.MeshBasicMaterial({ map: canvasTex(500, 300, g => { g.fillStyle = '#fff'; g.fillRect(0, 0, 500, 300); g.fillStyle = '#0080E8'; g.font = 'bold 34px Montserrat,sans-serif'; g.fillText('Seguimientos', 24, 52);
-    g.fillStyle = '#2F333C'; g.font = '26px Montserrat,sans-serif'; g.fillText(`${segP.length} pendientes`, 24, 110); g.fillStyle = segL ? '#B3261E' : '#3F886B'; g.fillText(`${segL} atrasados`, 24, 150);
-    segP.slice(0, 3).forEach((s, i) => { g.fillStyle = '#6A6D76'; g.font = '20px Montserrat,sans-serif'; g.fillText('• ' + s.title.slice(0, 32), 24, 200 + i * 30); }); }) }));
-  wb.position.set(-FW / 2 + 0.25, 4, -FD / 2 + 8.5); wb.rotation.y = Math.PI / 2; wb.userData.go = 'follow'; scene.add(wb);
-  const tt = totals(S.projects.filter(p => !p.parent_id));
+  const segP = S.segs.filter(s => s.author === S.user.id && s.status !== 'done'), segL = segP.filter(s => segState(s) === 'late').length, tt = totals(S.projects.filter(p => !p.parent_id));
   const tv = new T.Mesh(new T.PlaneGeometry(4.4, 2.5), new T.MeshBasicMaterial({ map: canvasTex(440, 250, g => { const gr = g.createLinearGradient(0, 0, 440, 250); gr.addColorStop(0, '#0080E8'); gr.addColorStop(1, '#003FF9'); g.fillStyle = gr; g.fillRect(0, 0, 440, 250);
-    g.fillStyle = '#fff'; g.font = 'bold 26px Montserrat,sans-serif'; g.fillText('Pipeline', 20, 42); g.font = '22px Montserrat,sans-serif'; g.fillText('Retorno ' + fmtMoney(tt.ret), 20, 95); g.fillText('Costo ' + fmtMoney(tt.cost), 20, 135); g.fillText('Avance ' + Math.round(tt.prog) + '%', 20, 175);
-    g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(20, 200, 400, 14); g.fillStyle = '#ED7F32'; g.fillRect(20, 200, 4 * tt.prog, 14); }) }));
-  tv.position.set(10.2, 4.6, -FD / 2 + 0.25); tv.userData.go = 'board'; scene.add(tv); box(4.7, 2.8, 0.15, 0x111111, 10.2, 4.6, -FD / 2 + 0.15);
-  // sala de reuniones de vidrio (Proyectos) y oficina del CEO
-  const room = (x, z, w, d, label, go) => { const g = new T.Group(); [[w, 0.2, x, z - d / 2], [w, 0.2, x, z + d / 2]].forEach(([ww, , xx, zz]) => box(ww, 3, 0.12, glass, xx, 1.8, zz, g)); [[x - w / 2], [x + w / 2]].forEach(([xx]) => box(0.12, 3, d, glass, xx, 1.8, z, g));
-    box(w, 0.08, 0.14, 0x84858a, x, 3.3, z + d / 2, g); g.userData.go = go; scene.add(g); return g; };
-  const mx = FW / 2 - 4.5, mz = -FD / 2 + 4; room(mx, mz, 7, 6, 'Reuniones', 'board');
-  box(4, 0.25, 2, 0xffffff, mx, 1.4, mz).userData.go = 'board'; cyl(0.15, 1.3, 0x84858a, mx, 0.75, mz);
-  for (let i = -1; i <= 1; i += 2) for (let j = -1; j <= 1; j++) box(0.7, 0.9, 0.7, 0x2f333c, mx + j * 1.4, 0.75, mz + i * 1.5);
-  // decoración: plantas, estantes, lámparas, dispensador
-  const plant = (x, z) => { cyl(0.45, 0.8, 0xffffff, x, 0.7, z); const s = new T.Mesh(new T.SphereGeometry(0.75, 12, 10), M(0x3f886b)); s.position.set(x, 1.6, z); s.castShadow = !mobile; scene.add(s); };
-  plant(-FW / 2 + 1.2, FD / 2 - 1.2); plant(FW / 2 - 1.2, FD / 2 - 1.2); plant(-1, -FD / 2 + 1.2); plant(FW / 2 - 1.2, 0);
-  box(1.2, 4, 3.2, 0x7e3628, -FW / 2 + 0.9, 2.3, -FD / 2 + 3); [0.9, 1.9, 2.9, 3.9].forEach(y => [-1, 0, 1].forEach(z => box(0.5, 0.7, 0.5, PALETTE[(y * 3 + z + 5) % PALETTE.length], -FW / 2 + 1.3, y + 0.3, -FD / 2 + 3 + z * 0.9)));
-  cyl(0.4, 1.8, 0x9fd8ff, 0.8, 1.2, -FD / 2 + 1);
-  // personajes de bloques
-  const skin = M(0xf3bb40), pants = M(0x2f333c), clickables = [];
-  const figure = (c, x, z, rotY, seated) => {
-    const g = new T.Group(), col = new T.Color(c.color || '#0080E8'), mt = M(col);
-    const legY = seated ? 0.9 : 0.75;
-    if (seated) { box(0.75, 0.35, 0.9, pants, 0, legY, 0.25, g); box(0.75, 0.6, 0.3, pants, 0, legY - 0.4, 0.65, g); } else { box(0.34, 1, 0.4, pants, -0.2, 0.8, 0, g); box(0.34, 1, 0.4, pants, 0.2, 0.8, 0, g); }
-    box(0.85, 0.95, 0.5, mt, 0, legY + 0.65, 0, g); box(0.22, 0.8, 0.26, mt, -0.55, legY + 0.6, seated ? 0.2 : 0, g); box(0.22, 0.8, 0.26, mt, 0.55, legY + 0.6, seated ? 0.2 : 0, g);
-    cyl(0.3, 0.55, skin, 0, legY + 1.45, 0, g, 18); cyl(0.13, 0.15, skin, 0, legY + 1.8, 0, g, 10);
-    const hair = M(c.ceo ? 0x2f333c : 0x4d3a2a), hy = legY + 1.72;
-    if (c.hair === 'wizard') { const cone = new T.Mesh(new T.ConeGeometry(0.42, 1.1, 16), M(col.clone().multiplyScalar(0.7))); cone.position.set(0, hy + 0.5, 0); g.add(cone); cyl(0.5, 0.06, col.clone().multiplyScalar(0.7), 0, hy, 0, g); }
-    else if (c.hair === 'cap') { cyl(0.33, 0.22, mt, 0, hy, 0, g); box(0.4, 0.06, 0.35, mt, 0, hy - 0.08, 0.3, g); }
-    else if (c.hair !== 'none') { cyl(0.33, 0.22, hair, 0, hy, 0, g); if (c.hair === 'long') box(0.62, 0.55, 0.2, hair, 0, hy - 0.3, -0.22, g); }
-    if (c.ceo) { const crown = cyl(0.25, 0.18, M(0xf3bb40), 0, hy + 0.35, 0, g, 8); crown.material.emissive = new T.Color(0x553300); }
-    g.position.set(x, 0.25, z); g.rotation.y = rotY; g.traverse(o => { o.userData.member = c.id; }); scene.add(g); clickables.push(g); return g;
+    g.fillStyle = '#fff'; g.font = 'bold 26px Montserrat,sans-serif'; g.fillText('Pipeline', 20, 42); g.font = '21px Montserrat,sans-serif'; g.fillText('Retorno ' + fmtMoney(tt.ret), 20, 92); g.fillText('Costo ' + fmtMoney(tt.cost), 20, 128);
+    g.fillText(`Seguimientos: ${segP.length} · ${segL} atrasados`, 20, 164); g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(20, 200, 400, 14); g.fillStyle = '#ED7F32'; g.fillRect(20, 200, 4 * tt.prog, 14); }) }));
+  tv.position.set(15.2 - (30 - FW), 4.6, -FD / 2 + 0.25); tv.userData.go = 'board'; scene.add(tv); box(4.7, 2.8, 0.15, 0x111111, tv.position.x, 4.6, -FD / 2 + 0.15);
+  // sala de reuniones y oficina CEO de vidrio
+  const room = (x, z, w, d) => { [[x, z - d / 2, w, 0.12], [x, z + d / 2, w, 0.12]].forEach(([xx, zz, ww, dd]) => box(ww, 3, dd, glass, xx, 1.8, zz)); [x - w / 2, x + w / 2].forEach(xx => box(0.12, 3, d, glass, xx, 1.8, z)); box(w, 0.1, 0.16, 0x84858a, x, 3.3, z + d / 2); box(0.16, 0.1, d, 0x84858a, x + w / 2, 3.3, z); };
+  const mx = FW / 2 - 5, mz = -FD / 2 + 4; room(mx, mz, 8, 6); const mt = box(4.4, 0.25, 2.2, 0xffffff, mx, 1.4, mz); mt.userData.go = 'board'; cyl(0.15, 1.2, 0x84858a, mx, 0.8, mz);
+  for (let i = -1; i <= 1; i += 2) for (let j = -1; j <= 1; j++) { box(0.75, 0.15, 0.75, 0x2f333c, mx + j * 1.45, 0.95, mz + i * 1.6); box(0.75, 0.7, 0.12, 0x2f333c, mx + j * 1.45, 1.35, mz + i * 1.95); }
+  const cx = -FW / 2 + 5.2, cz = FD / 2 - 4; room(cx, cz, 8, 6.5); box(7, 0.04, 5, 0x7128b7, cx, 0.27, cz + 0.2);
+  // elementos de oficina (personalizables)
+  const saved = S.settings[officeKey()], items = saved?.items?.length ? saved.items : defaultItems(FW, FD), itemObjs = [];
+  const build = it => { const g = new T.Group(), p = g;
+    switch (it.type) {
+      case 'printer': box(1.6, 1.1, 1.2, 0xc9cacf, 0, 0.8, 0, p); box(1.5, 0.3, 1.1, 0x4d5059, 0, 1.5, 0, p); box(1.1, 0.04, 0.8, 0xffffff, 0, 1.68, 0.1, p); g.userData.blink = box(0.12, 0.06, 0.05, M(0x60c69f, { emissive: new T.Color(0x60c69f) }), 0.55, 1.3, 0.61, p); break;
+      case 'rack': box(1.2, 4, 1.2, 0x1e2230, 0, 2.25, 0, p); g.userData.leds = []; for (let y = 0.8; y < 4; y += 0.45) { box(1.05, 0.32, 0.05, 0x2f333c, 0, y, 0.61, p); for (let k = 0; k < 3; k++) g.userData.leds.push(box(0.07, 0.07, 0.05, M([0x60c69f, 0x0080e8, 0xed7f32][k], { emissive: new T.Color([0x60c69f, 0x0080e8, 0xed7f32][k]) }), -0.35 + k * 0.15, y, 0.65, p)); } break;
+      case 'coffee': box(2.4, 1.4, 1, 0x7e3628, 0, 0.95, 0, p); box(2.5, 0.1, 1.1, 0xeeedf2, 0, 1.7, 0, p); box(0.6, 0.8, 0.6, 0x2f333c, -0.6, 2.15, 0, p); cyl(0.12, 0.25, 0xffffff, 0.3, 1.88, 0.1, p); cyl(0.12, 0.25, 0xed7f32, 0.65, 1.88, 0.1, p); break;
+      case 'cooler': box(0.8, 1.6, 0.8, 0xffffff, 0, 1.05, 0, p); cyl(0.35, 0.9, M(0x9fd8ff, { transparent: true, opacity: 0.7 }), 0, 2.3, 0, p); break;
+      case 'sofa': box(3.2, 0.6, 1.2, 0x0080e8, 0, 0.6, 0, p); box(3.2, 0.9, 0.3, 0x0080e8, 0, 1.1, -0.45, p); box(0.3, 0.8, 1.2, 0x003ff9, -1.6, 0.8, 0, p); box(0.3, 0.8, 1.2, 0x003ff9, 1.6, 0.8, 0, p); box(0.9, 0.5, 0.25, 0xed7f32, -0.7, 1.1, -0.2, p); break;
+      case 'shelf': box(1, 4, 3, 0x7e3628, 0, 2.25, 0, p); [0.9, 1.9, 2.9, 3.9].forEach((y, r) => [-1, -0.4, 0.3, 0.9].forEach((z, k) => box(0.6, 0.65, 0.4, PALETTE[(r * 4 + k) % PALETTE.length], 0.15, y + 0.3, z, p))); break;
+      case 'cabinet': box(1, 1.8, 1, 0x84858a, 0, 1.15, 0, p); [0.7, 1.3, 1.85].forEach(y => box(0.3, 0.06, 0.05, 0x2f333c, 0, y, 0.52, p)); break;
+      case 'table': cyl(1.2, 0.15, 0xffffff, 0, 1.4, 0, p, 24); cyl(0.12, 1.2, 0x84858a, 0, 0.8, 0, p); [0, 2.1, 4.2].forEach(a => box(0.6, 0.6, 0.6, 0x9648d9, Math.sin(a) * 1.8, 0.6, Math.cos(a) * 1.8, p)); break;
+      case 'plant': cyl(0.45, 0.8, 0xffffff, 0, 0.7, 0, p, 14, 0.35); sph(0.7, 0x3f886b, 0, 1.6, 0, p); sph(0.45, 0x60c69f, 0.3, 2, 0.2, p); break;
+      case 'tree': cyl(0.6, 1, 0xeeedf2, 0, 0.75, 0, p, 14, 0.45); cyl(0.12, 1.6, 0x7e3628, 0, 2, 0, p); sph(1.1, 0x3f886b, 0, 3.3, 0, p); sph(0.8, 0x60c69f, 0.5, 3.9, 0.3, p); break;
+      case 'lamp': cyl(0.4, 0.1, 0x2f333c, 0, 0.32, 0, p); cyl(0.05, 3.4, 0x2f333c, 0, 2, 0, p); cyl(0.3, 0.6, M(0xfff3cf, { emissive: new T.Color(0xffd36b), emissiveIntensity: dark ? 1 : 0.3 }), 0, 3.7, 0, p, 14, 0.5); if (dark) { const l = new T.PointLight(0xffd9a0, 0.7, 7); l.position.set(0, 3.4, 0); p.add(l); } break;
+      case 'rug': box(5, 0.04, 3.4, 0x9648d9, 0, 0.27, 0, p); box(4.4, 0.05, 2.8, 0xc695d7, 0, 0.28, 0, p); break;
+      case 'tv': box(0.8, 1.6, 0.8, 0x2f333c, 0, 1.05, 0, p); box(2.8, 1.6, 0.12, 0x111111, 0, 2.6, 0, p); g.userData.screen = box(2.6, 1.4, 0.05, M(0x0080e8, { emissive: new T.Color(0x0080e8), emissiveIntensity: 0.6 }), 0, 2.6, 0.07, p); break;
+      case 'beanbag': sph(0.8, 0xed7f32, 0, 0.7, 0, p).scale.set(1, 0.6, 1); break;
+      case 'board': box(0.1, 2, 3, 0xffffff, 0, 2.2, 0, p); box(0.15, 2.1, 0.08, 0x84858a, 0, 2.2, -1.55, p); box(0.15, 2.1, 0.08, 0x84858a, 0, 2.2, 1.55, p); [0x0080e8, 0xed7f32, 0x60c69f].forEach((c, k) => box(0.12, 0.25, 0.9, c, 0.06, 2.6 - k * 0.45, -0.5 + k * 0.4, p)); g.userData.go = 'follow'; break;
+    }
+    g.position.set(it.x, 0.25, it.z); g.rotation.y = (it.rot || 0) * Math.PI / 2; g.userData.item = it; g.traverse(o => { o.userData.itemId = it.id; }); scene.add(g); itemObjs.push(g); return g; };
+  items.forEach(build);
+  // escritorios: la persona se sienta mirando hacia la cámara
+  const deskFor = new Map(), figs = [];
+  const desk = (x, z, m, big) => { const w = big ? 4 : 3; const g = new T.Group();
+    box(w, 0.18, 1.7, dark ? 0x3a4154 : 0xffffff, 0, 1.6, 0, g); box(0.12, 1.4, 1.5, 0x84858a, -w / 2 + 0.1, 0.85, 0, g); box(0.12, 1.4, 1.5, 0x84858a, w / 2 - 0.1, 0.85, 0, g); box(w, 0.06, 0.1, m.color || '#0080E8', 0, 1.72, 0.84, g);
+    const scr = M(0x0b1530, { emissive: new T.Color(m.color || '#0080E8'), emissiveIntensity: dark ? 0.55 : 0.3 });
+    const lap = (lx) => { box(1.1, 0.05, 0.75, 0x84858a, lx, 1.72, -0.35, g); const sc = new T.Group(); sc.position.set(lx, 1.74, 0.02); sc.rotation.x = -0.35; g.add(sc); box(1.1, 0.62, 0.05, 0x84858a, 0, 0.31, 0, sc); const s = box(1.0, 0.52, 0.02, scr, 0, 0.31, -0.03, sc); return s; };
+    const s1 = lap(-0.3); if (big) lap(1.2); cyl(0.12, 0.25, PALETTE[(x * 7 | 0) % PALETTE.length], w / 2 - 0.45, 1.82, 0, g);
+    if (!big) sph(0.22, 0x3f886b, -w / 2 + 0.35, 1.9, 0.3, g);
+    box(1, 0.14, 1, 0x2f333c, 0, 1.0, -1.25, g); box(1, 1, 0.14, 0x2f333c, 0, 1.55, -1.75, g); cyl(0.07, 0.75, 0x84858a, 0, 0.55, -1.25, g); g.userData.faceFix = true;
+    g.position.set(x, 0.25, z); g.traverse(o => { o.userData.member = m.id; }); scene.add(g);
+    if (memberStats(m).late) { const l = new T.PointLight(0xff3b30, 1.4, 4.5); l.position.set(x, 3, z); scene.add(l); }
+    deskFor.set(m.id, { seat: new T.Vector3(x, 0, z - 1.05), aisle: z - 2.7, screen: s1 }); };
+  if (ceo) desk(cx, cz - 0.2, ceo, true);
+  others.forEach((m, i) => { const r = Math.floor(i / cols), c = i % cols; desk(-FW / 2 + 12 + c * 4.3, -FD / 2 + 10.5 + r * 5.5, m, false); });
+  // figuras de bloques con cabeza grande, cara, cabello y piel
+  const figure = m => {
+    const root = new T.Group(), body = new T.Group(); root.add(body); const col = new T.Color(m.color || '#0080E8'), skin = M(SKINS[m.skin] || SKINS.medio), hairM = M(HAIRC[m.hairColor] || HAIRC.castano), pant = M(0x2f333c);
+    const hipL = new T.Group(), hipR = new T.Group(); hipL.position.set(-0.21, 1.05, 0); hipR.position.set(0.21, 1.05, 0); body.add(hipL, hipR);
+    [hipL, hipR].forEach(hp => { box(0.38, 1, 0.48, pant, 0, -0.5, 0, hp); box(0.4, 0.12, 0.6, 0x1e1b1a, 0, -0.98, 0.05, hp); });
+    box(0.86, 0.22, 0.52, pant, 0, 1.12, 0, body);
+    const torso = box(0.95, 1, 0.56, M(col), 0, 1.72, 0, body); torso.geometry = new T.BoxGeometry(0.95, 1, 0.56); box(0.3, 0.5, 0.02, M(col.clone().multiplyScalar(0.75)), 0, 1.85, 0.29, body);
+    const shL = new T.Group(), shR = new T.Group(); shL.position.set(-0.6, 2.1, 0); shR.position.set(0.6, 2.1, 0); body.add(shL, shR);
+    [shL, shR].forEach(s => { box(0.26, 0.8, 0.3, M(col), 0, -0.38, 0, s); cyl(0.13, 0.2, skin, 0, -0.85, 0.02, s, 10); });
+    cyl(0.16, 0.18, skin, 0, 2.3, 0, body, 10);
+    const head = new T.Group(); head.position.set(0, 2.78, 0); body.add(head);
+    const hm = [new T.MeshStandardMaterial({ map: faceTex(T, m), roughness: 0.6 }), skin, skin];
+    const hd = sh(new T.Mesh(new T.CylinderGeometry(0.46, 0.46, 0.78, 28, 1, false, Math.PI, Math.PI * 2), hm)); head.add(hd); cyl(0.2, 0.14, skin, 0, 0.46, 0, head, 12);
+    const hy = 0.36, hs = m.hair || 'corto';
+    if (hs === 'mago') { const c2 = M(col.clone().multiplyScalar(0.65)); cyl(0.68, 0.07, c2, 0, hy + 0.05, 0, head, 24); const cone = sh(new T.Mesh(new T.ConeGeometry(0.5, 1.2, 18), c2)); cone.position.set(0, hy + 0.65, 0); cone.rotation.z = 0.15; head.add(cone); cyl(0.5, 0.18, hairM, 0, hy - 0.1, -0.05, head, 20); }
+    else if (hs === 'gorra') { cyl(0.5, 0.28, M(col), 0, hy + 0.08, 0, head, 20); box(0.55, 0.06, 0.4, M(col), 0, hy - 0.02, 0.5, head); box(0.95, 0.35, 0.2, hairM, 0, -0.05, -0.42, head); }
+    else { const cap = sh(new T.Mesh(new T.SphereGeometry(0.52, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), hairM)); cap.position.set(0, hy - 0.05, -0.02); cap.scale.set(1, 0.6, 1); head.add(cap);
+      box(0.98, 0.42, 0.22, hairM, 0, 0.12, -0.38, head);
+      if (hs === 'largo') { box(1.0, 1.0, 0.25, hairM, 0, -0.25, -0.38, head); box(0.18, 0.75, 0.5, hairM, -0.46, -0.1, -0.08, head); box(0.18, 0.75, 0.5, hairM, 0.46, -0.1, -0.08, head); }
+      if (hs === 'cola') { sph(0.2, hairM, 0, 0.2, -0.62, head); box(0.22, 0.75, 0.22, hairM, 0, -0.25, -0.68, head); }
+      if (hs === 'rizado') for (let k = 0; k < 9; k++) { const a = k / 9 * Math.PI * 2; sph(0.2, hairM, Math.sin(a) * 0.45, 0.32 + (k % 2) * 0.06, Math.cos(a) * 0.45 - 0.05, head); } }
+    if (m.ceo) { const cr = cyl(0.3, 0.2, M(0xf3bb40, { emissive: new T.Color(0x553300), metalness: 0.4 }), 0, hy + 0.32, 0, head, 8); }
+    root.scale.setScalar(0.85); root.traverse(o => { o.userData.member = m.id; }); scene.add(root);
+    const bubble = h('div', { class: 'of-bubble hidden' }); wrap.append(bubble);
+    return { m, root, body, hipL, hipR, shL, shR, head, bubble };
   };
-  const desk = (x, z, rot, c, big) => { const g = new T.Group(), w = big ? 4 : 2.8;
-    box(w, 0.18, 1.6, dark ? 0x3a4154 : 0xffffff, 0, 1.6, 0, g); box(0.12, 1.5, 1.4, 0x84858a, -w / 2 + 0.1, 0.85, 0, g); box(0.12, 1.5, 1.4, 0x84858a, w / 2 - 0.1, 0.85, 0, g);
-    box(w, 0.06, 0.12, c.color || '#0080E8', 0, 1.72, 0.78, g);
-    const scr = new T.MeshStandardMaterial({ color: 0x0b1530, emissive: new T.Color(c.color || '#0080E8').multiplyScalar(dark ? 0.6 : 0.35) });
-    box(1.3, 0.8, 0.08, scr, -0.5, 2.2, -0.5, g); box(0.1, 0.4, 0.1, 0x2f333c, -0.5, 1.85, -0.5, g); if (big) box(1.3, 0.8, 0.08, scr, 0.9, 2.2, -0.5, g);
-    box(0.9, 0.12, 0.9, 0x2f333c, 0, 0.95, 1.25, g); box(0.9, 0.9, 0.12, 0x2f333c, 0, 1.4, 1.7, g);
-    g.position.set(x, 0.25, z); g.rotation.y = rot; g.traverse(o => { o.userData.member = c.id; }); scene.add(g); clickables.push(g);
-    const st = memberStats(c); if (st.late) { const l = new T.PointLight(0xff3b30, 1.2, 4); l.position.set(x, 3, z); scene.add(l); }
-    figure(c, x + Math.sin(rot) * 1.25, z + Math.cos(rot) * 1.25, rot + Math.PI, true); };
-  const ceo = members.find(m => m.ceo), others = members.filter(m => !m.ceo);
-  // oficina CEO (esquina frontal izquierda, con vidrio)
-  const cx = -FW / 2 + 5, cz = FD / 2 - 4; room(cx, cz, 7.5, 6.5, 'CEO', null);
-  if (ceo) desk(cx, cz - 0.6, 0, ceo, true);
-  others.forEach((m, i) => { const r = Math.floor(i / cols), cI = i % cols, x = -FW / 2 + 10.5 + cI * 4.2, z = -FD / 2 + 9.5 + r * 5.5; desk(x, z, 0, m, false); });
-  // etiquetas HTML sobre cada integrante
-  const labels = members.map(m => { const st = memberStats(m); const el = h('button', { class: 'of-label' + (st.late ? ' late' : ''), style: `--c:${m.color}`, title: `${m.name} · ${m.role || 'Sin rol'} · ${st.pend} pendientes` + (st.late ? ` · ${st.late} atrasadas` : ''), onclick: () => openMember(m) }, h('b', {}, (m.ceo ? '👑 ' : '') + m.name.split(' ')[0]), st.pend ? h('i', {}, st.pend) : null, h('span', {}, m.role || 'Sin rol')); wrap.append(el); return { el, m }; });
-  const posOf = id => { let p = null; clickables.forEach(g => { if (!p && g.userData.member === id && g.children.length > 6) { p = g.position.clone(); p.y = 3.6; } }); return p; };
-  const placeLabels = () => labels.forEach(({ el, m }) => { const p = posOf(m.id); if (!p) return; p.project(cam); el.style.left = ((p.x + 1) / 2 * wrap.clientWidth) + 'px'; el.style.top = ((1 - p.y) / 2 * wrap.clientHeight) + 'px'; });
-  // controles: arrastrar = girar, rueda/pellizco = zoom, Shift/2 dedos = mover
-  let drag = null, pinch = null; const el = renderer.domElement, ray = new T.Raycaster(), mv = new T.Vector2();
-  el.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, t: theta, p: phi, tx: target.x, tz: target.z, pan: e.shiftKey || e.button === 2, moved: false }; el.setPointerCapture(e.pointerId); });
-  el.addEventListener('pointermove', e => { if (!drag || pinch) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+  const pois = () => itemObjs.filter(g => WALK_TO.includes(g.userData.item.type)).map(g => { const v = new T.Vector3(); g.getWorldPosition(v); const r = g.rotation.y; return new T.Vector3(v.x + Math.sin(r) * 1.6, 0, v.z + Math.cos(r) * 1.6); });
+  const SAY = { printer: 'Imprimiendo…', rack: 'Revisando servidores', coffee: '☕ Café', cooler: '💧 Agua', sofa: 'Pausa activa', shelf: 'Buscando un libro', table: 'Reunión rápida', board: 'Planeando', cabinet: 'Buscando archivos' };
+  members.forEach(m => { const d = deskFor.get(m.id); if (!d) return; const f = figure(m); f.d = d; f.state = 'sit'; f.timer = 4 + Math.random() * 10; f.path = []; f.root.position.copy(d.seat); figs.push(f); });
+  const setSit = (f, on) => { f.body.position.y = on ? -0.55 : 0; f.hipL.rotation.x = f.hipR.rotation.x = on ? -Math.PI / 2 : 0; };
+  figs.forEach(f => { setSit(f, true); f.root.rotation.y = 0; });
+  const nearPoi = () => { const ps = pois(); if (!ps.length) return null; const i = Math.floor(Math.random() * ps.length), g = itemObjs.filter(o => WALK_TO.includes(o.userData.item.type))[i]; return { p: ps[i], type: g.userData.item.type }; };
+  const startWalk = f => { const t = Math.random() < 0.25 && figs.length > 1 ? (() => { const o = figs[Math.floor(Math.random() * figs.length)]; return o === f ? null : { p: new T.Vector3(o.d.seat.x + 1.2, 0, o.d.aisle + 0.2), type: 'colega', who: o.m.name.split(' ')[0] }; })() : nearPoi();
+    if (!t) { f.timer = 5; return; } const s = f.d.seat; f.goal = t; f.path = [new T.Vector3(s.x, 0, f.d.aisle), new T.Vector3(t.p.x, 0, f.d.aisle), t.p.clone()]; f.state = 'walk'; setSit(f, false); };
+  const backWalk = f => { const s = f.d.seat; f.path = [new T.Vector3(f.root.position.x, 0, f.d.aisle), new T.Vector3(s.x, 0, f.d.aisle), s.clone()]; f.state = 'return'; setSit(f, false); f.bubble.classList.add('hidden'); };
+  // etiquetas
+  const labels = members.map(m => { const st = memberStats(m); const el = h('button', { class: 'of-label' + (st.late ? ' late' : ''), style: `--c:${m.color}`, title: `${m.name} · ${m.role || 'Sin rol'} · ${st.pend} pendientes` + (st.late ? ` · ${st.late} atrasadas` : ''), onclick: () => openMember(m) },
+    h('b', {}, (m.ceo ? '👑 ' : '') + m.name.split(' ')[0]), st.pend ? h('i', {}, st.pend) : null, h('span', {}, m.role || 'Sin rol')); wrap.append(el); return { el, m }; });
+  const proj = (v, el, dy = 0) => { const p = v.clone(); p.project(cam); el.style.left = ((p.x + 1) / 2 * wrap.clientWidth) + 'px'; el.style.top = ((1 - p.y) / 2 * wrap.clientHeight + dy) + 'px'; };
+  // controles + modo edición de elementos
+  let drag = null, pinch = null, sel = null; const el = renderer.domElement, ray = new T.Raycaster(), mv = new T.Vector2(), floor = new T.Plane(new T.Vector3(0, 1, 0), -0.25), hitP = new T.Vector3();
+  const pick = e => { const r = el.getBoundingClientRect(); mv.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1); ray.setFromCamera(mv, cam); return ray.intersectObjects(scene.children, true); };
+  const objOf = (hits, key) => { for (const i of hits) { let o = i.object; while (o) { if (o.userData[key]) return o; o = o.parent; } } return null; };
+  const saveItems = () => { const its = itemObjs.map(g => g.userData.item); S.settings[officeKey()] = { items: its }; q(sb.from('settings').upsert({ key: officeKey(), value: { items: its } })).catch(() => {}); };
+  const showSel = g => { sel = g; itemObjs.forEach(o => o.traverse(x => { if (x.material && x.material.emissive && x.userData._sel) { x.material = x.userData._orig; delete x.userData._sel; } }));
+    S.oSel?.(g ? g.userData.item : null); };
+  el.addEventListener('pointerdown', e => { const hits = pick(e); const it = S.oEdit && objOf(hits, 'item');
+    if (it) { const g = itemObjs.find(o => o.userData.item === it.userData.item); showSel(g); drag = { item: g, moved: false }; el.setPointerCapture(e.pointerId); return; }
+    drag = { x: e.clientX, y: e.clientY, t: theta, p: phi, tx: target.x, tz: target.z, pan: e.shiftKey || e.button === 2, moved: false }; el.setPointerCapture(e.pointerId); });
+  el.addEventListener('pointermove', e => { if (!drag || pinch) return;
+    if (drag.item) { pick(e); if (ray.ray.intersectPlane(floor, hitP)) { drag.moved = true; drag.item.position.x = Math.max(-FW / 2 + 0.8, Math.min(FW / 2 - 0.8, Math.round(hitP.x * 2) / 2)); drag.item.position.z = Math.max(-FD / 2 + 0.8, Math.min(FD / 2 - 0.8, Math.round(hitP.z * 2) / 2)); } return; }
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
     if (drag.pan) { const s = 0.05 / zoom; target.x = drag.tx - (dx * Math.cos(theta) + dy * Math.sin(theta)) * s; target.z = drag.tz - (-dx * Math.sin(theta) + dy * Math.cos(theta)) * s; }
     else { theta = drag.t - dx * 0.008; phi = Math.max(0.25, Math.min(1.35, drag.p + dy * 0.006)); } setCam(); });
-  el.addEventListener('pointerup', e => { if (drag && !drag.moved) { const r = el.getBoundingClientRect(); mv.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1); ray.setFromCamera(mv, cam);
-    const hit = ray.intersectObjects(scene.children, true).find(i => { let o = i.object; while (o) { if (o.userData.member || o.userData.go) return true; o = o.parent; } return false; });
-    if (hit) { let o = hit.object; while (o && !o.userData.member && !o.userData.go) o = o.parent; if (o.userData.member) openMember(S.kcols.find(x => x.id === o.userData.member)); else if (o.userData.go) go(o.userData.go); } } drag = null; });
+  el.addEventListener('pointerup', e => {
+    if (drag?.item) { if (drag.moved) { const it = drag.item.userData.item; it.x = drag.item.position.x; it.z = drag.item.position.z; saveItems(); } drag = null; return; }
+    if (drag && !drag.moved && !S.oEdit) { const hits = pick(e), mo = objOf(hits, 'member'), go2 = objOf(hits, 'go'); if (mo) openMember(S.kcols.find(x => x.id === mo.userData.member)); else if (go2) go(go2.userData.go); }
+    else if (drag && !drag.moved && S.oEdit) showSel(null);
+    drag = null; });
   el.addEventListener('contextmenu', e => e.preventDefault());
-  el.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(0.45, Math.min(3, zoom * (e.deltaY < 0 ? 1.1 : 0.9))); setCam(); }, { passive: false });
-  const touches = new Map();
+  el.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(0.45, Math.min(3.5, zoom * (e.deltaY < 0 ? 1.1 : 0.9))); setCam(); }, { passive: false });
   el.addEventListener('touchstart', e => { if (e.touches.length === 2) { const [a, b] = e.touches; pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), z: zoom }; } }, { passive: true });
-  el.addEventListener('touchmove', e => { if (pinch && e.touches.length === 2) { const [a, b] = e.touches; zoom = Math.max(0.45, Math.min(3, pinch.z * Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / pinch.d)); setCam(); } }, { passive: true });
+  el.addEventListener('touchmove', e => { if (pinch && e.touches.length === 2) { const [a, b] = e.touches; zoom = Math.max(0.45, Math.min(3.5, pinch.z * Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / pinch.d)); setCam(); } }, { passive: true });
   el.addEventListener('touchend', () => { if (pinch) { pinch = null; drag = null; } });
-  const ro = new ResizeObserver(() => { renderer.setSize(wrap.clientWidth, wrap.clientHeight); setCam(); }); ro.observe(wrap);
-  let raf = 0, alive = true; const loop = () => { if (!alive) return; raf = requestAnimationFrame(loop); if (!document.contains(wrap)) return OF?.dispose(); renderer.render(scene, cam); placeLabels(); };
-  setCam(); loop();
-  OF = { dispose: () => { alive = false; cancelAnimationFrame(raf); ro.disconnect(); renderer.dispose(); scene.traverse(o => { o.geometry?.dispose?.(); }); },
-    zoom: f => { zoom = Math.max(0.45, Math.min(3, zoom * f)); setCam(); }, reset: () => { zoom = mobile ? 0.8 : 1.45; theta = Math.PI / 4; phi = 0.62; target.set(0, 0, 0); setCam(); } };
+  const rsz = new ResizeObserver(() => { renderer.setSize(wrap.clientWidth, wrap.clientHeight); setCam(); }); rsz.observe(wrap);
+  // animación: trabajar, caminar, visitar y volver
+  let raf = 0, alive = true, tAcc = 0; const tmp = new T.Vector3();
+  const loop = () => { if (!alive) return; raf = requestAnimationFrame(loop); if (!document.contains(wrap)) return OF?.dispose();
+    const dt = Math.min(0.25, clock.getDelta()); tAcc += dt; const now = new Date();
+    hand1.rotation.z = -(now.getHours() % 12 + now.getMinutes() / 60) / 12 * Math.PI * 2; hand2.rotation.z = -now.getMinutes() / 60 * Math.PI * 2;
+    itemObjs.forEach(g => { const u = g.userData; if (u.leds) u.leds.forEach((l, i) => { l.material.emissiveIntensity = (Math.sin(tAcc * 6 + i * 1.7) > 0.3) ? 1 : 0.1; }); if (u.blink) u.blink.material.emissiveIntensity = Math.sin(tAcc * 3) > 0 ? 1 : 0.2; if (u.screen) u.screen.material.emissiveIntensity = 0.5 + Math.sin(tAcc * 2) * 0.15; });
+    figs.forEach(f => { const pos = f.root.position;
+      if (f.state === 'sit') { f.shL.rotation.x = -1.25 + Math.sin(tAcc * 14 + f.m.id.length) * 0.12; f.shR.rotation.x = -1.25 + Math.cos(tAcc * 13) * 0.12; f.head.rotation.y = Math.sin(tAcc * 0.7 + pos.x) * 0.25; f.root.rotation.y = 0;
+        f.d.screen.material.emissiveIntensity = (dark ? 0.55 : 0.3) + Math.sin(tAcc * 4 + pos.x) * 0.08; f.timer -= dt; if (f.timer <= 0) startWalk(f); }
+      else if (f.state === 'walk' || f.state === 'return') { const tgt = f.path[0]; if (!tgt) { if (f.state === 'walk') { f.state = 'visit'; f.timer = 4 + Math.random() * 5; const sayT = f.goal.type === 'colega' ? 'Hablando con ' + f.goal.who : SAY[f.goal.type] || ''; f.bubble.textContent = sayT; f.bubble.classList.toggle('hidden', !sayT); }
+          else { f.state = 'sit'; f.timer = 10 + Math.random() * 18; setSit(f, true); pos.copy(f.d.seat); } return; }
+        tmp.subVectors(tgt, pos); tmp.y = 0; const dist = tmp.length(), sp = 2.6 * dt;
+        if (dist < sp) { pos.x = tgt.x; pos.z = tgt.z; f.path.shift(); } else { tmp.normalize(); pos.x += tmp.x * sp; pos.z += tmp.z * sp; const ang = Math.atan2(tmp.x, tmp.z); f.root.rotation.y += ((ang - f.root.rotation.y + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 10); }
+        const sw = Math.sin(tAcc * 10) * 0.6; f.hipL.rotation.x = sw; f.hipR.rotation.x = -sw; f.shL.rotation.x = -sw * 0.8; f.shR.rotation.x = sw * 0.8; f.body.position.y = Math.abs(Math.sin(tAcc * 10)) * 0.06; }
+      else if (f.state === 'visit') { f.hipL.rotation.x = f.hipR.rotation.x = 0; f.shL.rotation.x = Math.sin(tAcc * 3) * 0.3; f.shR.rotation.x = -0.4 + Math.sin(tAcc * 2) * 0.2; f.head.rotation.y = Math.sin(tAcc * 1.5) * 0.4; f.timer -= dt; if (f.timer <= 0) backWalk(f); }
+      tmp.copy(pos); tmp.y = 3.9; proj(tmp, f.bubble, -18); });
+    labels.forEach(({ el: le, m }) => { const f = figs.find(x => x.m.id === m.id); if (!f) return; tmp.copy(f.root.position); tmp.y = f.state === 'sit' ? 3.6 : 4.1; proj(tmp, le); });
+    renderer.render(scene, cam); };
+  setCam(); loop(); window.__ofFigs = figs;
+  OF = { dispose: () => { alive = false; cancelAnimationFrame(raf); rsz.disconnect(); renderer.dispose(); },
+    zoom: f => { zoom = Math.max(0.45, Math.min(3.5, zoom * f)); setCam(); }, reset: () => { zoom = mobile ? 0.8 : 1.35; theta = Math.PI / 4; phi = 0.62; target.set(0, 0, 0); setCam(); },
+    add: type => { const it = { id: uid(), type, x: Math.round((Math.random() * 6 - 3) * 2) / 2, z: Math.round((FD / 2 - 2.5) * 2) / 2, rot: 0 }; showSel(build(it)); saveItems(); toast('Elemento agregado: arrástralo a su lugar', 'ok'); },
+    rotate: () => { if (!sel) return; const it = sel.userData.item; it.rot = ((it.rot || 0) + 1) % 4; sel.rotation.y = it.rot * Math.PI / 2; saveItems(); },
+    remove: () => { if (!sel) return; scene.remove(sel); itemObjs.splice(itemObjs.indexOf(sel), 1); showSel(null); saveItems(); },
+    resetItems: () => { S.settings[officeKey()] = { items: [] }; q(sb.from('settings').upsert({ key: officeKey(), value: { items: [] } })).then(() => render()); } };
 }
 
 /* --- Centro de datos: subir bases y generar tareas --- */
@@ -758,11 +856,26 @@ async function dataCenter(m) {
 function renderOffice(m) {
   ensureCEO();
   const tab = S.otab || 'office', ro = !canEdit(), members = team();
-  const tabs = h('div', { class: 'seg', role: 'tablist' }, [['office', '🏢 Oficina'], ['team', '👥 Equipo y tareas'], ['data', '🗄 Centro de datos']].map(([k, l]) => h('button', { class: tab === k ? 'on' : '', role: 'tab', onclick: () => { S.otab = k; render(); } }, l)));
+  const tabs = h('div', { class: 'seg', role: 'tablist' }, [['office', '🏢 Oficina'], ['team', '👥 Equipo y tareas'], ['org', '🧭 Organigrama'], ['data', '🗄 Centro de datos']].map(([k, l]) => h('button', { class: tab === k ? 'on' : '', role: 'tab', onclick: () => { S.otab = k; render(); } }, l)));
   m.replaceChildren(h('div', { class: 'page-head hero' }, h('div', {}, h('h1', {}, 'Mi oficina'), h('p', {}, 'Tu equipo, sus roles y sus tareas · tú eres el CEO 👑')), tabs));
   const actions = ro ? null : h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, h('button', { class: 'btn primary', id: 'of-add', onclick: () => memberForm() }, h('span', { svg: I.plus }), 'Integrante'),
     h('button', { class: 'btn', onclick: () => { const c = members[0]; if (c) taskForm(c); } }, h('span', { svg: I.plus }), 'Asignar tarea'));
   if (tab === 'data') return dataCenter(m);
+  if (tab === 'org') {
+    const ceoM = members.find(x => x.ceo), bossOf = x => x.ceo ? null : (members.some(y => y.id === x.reports_to) ? x.reports_to : ceoM?.id);
+    const isUnder = (id, anc) => { let cur = members.find(x => x.id === id), n = 0; while (cur && n++ < 50) { const b = bossOf(cur); if (b === anc) return true; cur = members.find(x => x.id === b); } return false; };
+    const setBoss = async (id, boss) => { const x = S.kcols.find(y => y.id === id); if (!x || x.ceo || id === boss || isUnder(boss, id)) return toast('Movimiento no válido en el organigrama', 'err'); x.reports_to = boss; render(); await q(sb.from('kcols').update({ reports_to: boss }).eq('id', id)); toast(`${x.name} ahora reporta a ${S.kcols.find(y => y.id === boss)?.name}`, 'ok'); };
+    const node = x => { const st = memberStats(x), kids = members.filter(y => bossOf(y) === x.id);
+      const card = h('div', { class: 'org-card' + (st.late ? ' late' : ''), style: `--c:${x.color}`, draggable: !ro && !x.ceo ? 'true' : null, 'data-id': x.id,
+        ondragstart: e => { e.dataTransfer.setData('text/org', x.id); e.dataTransfer.effectAllowed = 'move'; }, ondragover: e => { if ([...e.dataTransfer.types].includes('text/org')) { e.preventDefault(); card.classList.add('drop-on'); } },
+        ondragleave: () => card.classList.remove('drop-on'), ondrop: e => { e.preventDefault(); card.classList.remove('drop-on'); const id = e.dataTransfer.getData('text/org'); if (id) setBoss(id, x.id); }, onclick: () => openMember(x) },
+        h('div', { class: 'of-avatar', style: `--c:${x.color}` }, h('span', {}, initials(x.name))), h('div', {}, h('b', {}, (x.ceo ? '👑 ' : '') + x.name), h('small', {}, x.role || 'Sin rol'), h('small', { class: 'org-k' }, `${st.pend} pend.` + (st.late ? ` · ${st.late} atras.` : ''))),
+        ro || x.ceo ? null : h('select', { class: 'org-sel', 'aria-label': 'Reporta a', onclick: e => e.stopPropagation(), onchange: e => setBoss(x.id, e.target.value) }, members.filter(y => y.id !== x.id).map(y => h('option', { value: y.id, selected: bossOf(x) === y.id }, '↑ ' + y.name))));
+      return h('li', {}, card, kids.length ? h('ul', {}, kids.map(node)) : null); };
+    m.append(h('div', { class: 'toolbar' }, actions, h('span', { class: 'muted' }, 'Arrastra una tarjeta sobre otra para cambiar a quién reporta, o usa el selector «↑»')),
+      h('div', { class: 'org-wrap' }, ceoM ? h('ul', { class: 'org' }, node(ceoM)) : h('p', { class: 'muted' }, 'Creando tu perfil de CEO…')));
+    return;
+  }
   if (tab === 'team') {
     m.append(h('div', { class: 'toolbar' }, actions, h('span', { class: 'muted' }, `${members.length} integrantes`)),
       h('div', { class: 'of-grid' }, members.map(c => { const st = memberStats(c);
@@ -773,8 +886,12 @@ function renderOffice(m) {
     return;
   }
   const wrap = h('div', { class: 'of-3d' }, h('div', { class: 'of-load muted' }, 'Construyendo la oficina…'));
+  const selBox = h('div', { class: 'of-sel hidden' }), editBtn = h('button', { class: 'btn' + (S.oEdit ? ' primary' : ''), onclick: () => { S.oEdit = !S.oEdit; render(); } }, S.oEdit ? '✓ Terminar edición' : '✋ Mover elementos');
+  S.oSel = it => { if (!it) return selBox.classList.add('hidden'); selBox.classList.remove('hidden'); selBox.replaceChildren(h('b', {}, (CATALOG.find(x => x[0] === it.type) || [, it.type])[1]), h('button', { class: 'btn', onclick: () => OF?.rotate() }, '⟳ Rotar'), h('button', { class: 'btn danger', onclick: () => OF?.remove() }, 'Eliminar')); };
+  const elemBar = ro ? null : h('div', { class: 'of-elems' }, h('button', { class: 'btn', onclick: e => menu(e.currentTarget, CATALOG.map(([k, l]) => ({ label: l, run: () => { if (!S.oEdit) { S.oEdit = true; render(); setTimeout(() => OF?.add(k), 600); } else OF?.add(k); } }))) }, h('span', { svg: I.plus }), 'Elemento'), editBtn,
+    S.oEdit ? h('button', { class: 'btn ghost', onclick: async () => { if (await confirmBox('Restablecer', '¿Volver a la decoración original de la oficina?', 'Restablecer')) OF?.resetItems(); } }, 'Restablecer') : null, selBox);
   const ctl = h('div', { class: 'of-ctl' }, h('button', { class: 'btn', 'aria-label': 'Acercar', onclick: () => OF?.zoom(1.2) }, '+'), h('button', { class: 'btn', 'aria-label': 'Alejar', onclick: () => OF?.zoom(0.83) }, '−'), h('button', { class: 'btn', onclick: () => OF?.reset() }, 'Centrar'));
-  m.append(h('div', { class: 'toolbar' }, actions, h('span', { class: 'muted' }, 'Arrastra para girar · rueda o pellizco para zoom · Shift + arrastrar para mover · clic en una persona para ver sus tareas')), h('div', { class: 'of-stage' }, wrap, ctl));
+  m.append(h('div', { class: 'toolbar' }, actions, elemBar, h('span', { class: 'muted' }, S.oEdit ? 'Modo edición: arrastra un elemento para moverlo · tócalo para rotarlo o eliminarlo' : 'Arrastra para girar · rueda o pellizco para zoom · Shift + arrastrar para mover · clic en una persona para ver sus tareas')), h('div', { class: 'of-stage' + (S.oEdit ? ' editing' : '') }, wrap, ctl));
   loadLib('lib/three.min.js', 'THREE').then(() => { wrap.querySelector('.of-load')?.remove(); try { office3D(wrap, members); } catch (e) { wrap.replaceChildren(h('p', { class: 'muted', style: 'padding:20px' }, 'Tu navegador no pudo mostrar la oficina 3D. Usa la pestaña «Equipo y tareas».')); } })
     .catch(() => wrap.replaceChildren(h('p', { class: 'muted', style: 'padding:20px' }, 'No se pudo cargar el motor 3D.')));
 }
