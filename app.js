@@ -944,15 +944,18 @@ async function supervisorCore(text, ctx) {
   // datos cargados en el Centro de datos
   const dsets = S.datasets.filter(d => d.author === S.user.id && d.head), dsOf = () => { const byName = dsets.find(d => n.includes(norm(d.name).replace(/\.[a-z]+$/, ''))); return byName || dsets.find(d => d.id === ctx.ds) || dsets.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0]; };
   if (/\b(bases?|datos cargados|archivos? de datos|dataset)\b/.test(n) && /(que|cuales|lista|tengo|hay)/.test(n)) return dsets.length ? 'Bases cargadas:\n' + dsets.map(d => `• ${d.name}: ${d.rows} filas · columnas: ${d.head.join(', ')}`).join('\n') : 'Aún no hay bases cargadas. Súbelas en «Centro de datos» y podré consultarlas.';
-  if (/grafic|chart|diagrama/.test(n) && dsets.length) { const d = dsOf(); ctx.ds = d.id; const H = d.head.map(x => norm(x)), hit = H.map((x, i) => [i, x && n.indexOf(x)]).filter(([, p]) => p >= 0).sort((a, b) => a[1] - b[1]).map(([i]) => i);
+  if (/grafic|chart|diagrama/.test(n) && dsets.length) { const d = await fullOf(dsOf()); ctx.ds = d.id; const H = d.head.map(x => norm(x)), hit = H.map((x, i) => [i, x && n.indexOf(x)]).filter(([, p]) => p >= 0).sort((a, b) => a[1] - b[1]).map(([i]) => i);
     const vi = hit.find(i => isNumCol(d, i)), ci = hit.find(i => i !== vi), type = /pastel|pie|torta/.test(n) ? 'pie' : /dona/.test(n) ? 'doughnut' : /linea|tendencia|evolucion/.test(n) ? 'line' : 'bar';
     setTimeout(() => openCharts(d, { ci, vi: vi ?? (ci == null ? undefined : ''), agg: /promedio/.test(n) ? 'avg' : /cantidad|cuant|contar/.test(n) ? 'count' : 'sum', type }), 50);
     return `Te abrí el gráfico de «${d.name}»` + (ci != null ? ` agrupado por ${d.head[ci]}` : '') + (vi != null ? ` con ${d.head[vi]}` : '') + '. Puedes cambiar columnas y tipo, y descargarlo como imagen.' + ((d.charts || []).length ? ` El archivo traía ${d.charts.length} gráfico(s); también los redibujé.` : ''); }
-  if (dsets.length && !/^(asigna|reasigna|distribuye|reparte|marca|completa)/.test(n)) { const d = dsOf(); const r = !findMember(text) && (/\b(base|registros?|casos?|datos|filas?|export\w*|excel|clientes?)\b/.test(n) || d.head.some(x => norm(x).length > 2 && n.includes(norm(x)))) ? dataQuery(d, text) : null;
+  if (dsets.length && !/^(asigna|reasigna|distribuye|reparte|marca|completa)/.test(n)) { const d = await fullOf(dsOf()); if (/analiz|analisis|insight|hallazgo|conclusion|resumen de la base|informe de la base/.test(n) && !findMember(text)) { ctx.ds = d.id; const ag = pickWorker({ title: 'análisis de datos ' + text, body: d.name }) || sm, rep = analyze(d, text);
+      if (ag && canEdit()) { const [k] = await q(sb.from('kcards').insert({ title: ('📊 Análisis: ' + d.name).slice(0, 200), body: rep, col_id: ag.id, prio: 'media', done: true, is_task: true, from: 'data', position: nextPos(cardsOf(ag.id)), author: S.user.id }).select()); S.kcards.push(k); }
+      return (ag && ag.id !== sm?.id ? `${ag.name} (${ag.role || 'equipo'}) analizó la base completa:\n` : '') + rep; }
+    const r = !findMember(text) && (/\b(base|registros?|casos?|datos|filas?|export\w*|excel|clientes?)\b/.test(n) || d.head.some(x => norm(x).length > 2 && n.includes(norm(x)))) ? dataQuery(d, text) : null;
     if (r) { ctx.ds = d.id; const ag = pickWorker({ title: text, body: 'datos ' + d.name }) || sm;
       if (ag && canEdit()) { const [k] = await q(sb.from('kcards').insert({ title: ('📊 ' + text).slice(0, 200), body: r.text, col_id: ag.id, prio: 'media', done: true, is_task: true, from: 'data', position: nextPos(cardsOf(ag.id)), author: S.user.id }).select()); S.kcards.push(k); }
       return (ag && ag.id !== sm?.id ? `Se lo pedí a ${ag.name} (${ag.role || 'equipo'}), revisó la base y este es el resultado:\n` : '') + r.text; } }
-  if (/\b(base|datos|columna|filas?)\b/.test(n) && dsets.length) { const d = dsOf(); ctx.ds = d.id; const H = d.head.map(x => norm(x));
+  if (/\b(base|datos|columna|filas?)\b/.test(n) && dsets.length) { const d = await fullOf(dsOf()); ctx.ds = d.id; const H = d.head.map(x => norm(x));
     const col = H.findIndex(hh => hh && n.includes(hh));
     if (/cuantas filas|cuantos registros|tamano/.test(n)) return `${d.name} tiene ${d.rows} filas.`;
     if (/columnas|campos|estructura/.test(n)) return `${d.name} tiene estas columnas: ${d.head.join(', ')}.`;
@@ -1126,7 +1129,46 @@ function dataQuery(d, text) {
     e.slice(0, top || 15).forEach(([k, o]) => lines.push(`• ${k}: ${o.n.toLocaleString('es-CR')}` + (sumc >= 0 ? ` · ${o.s.toLocaleString('es-CR', { maximumFractionDigits: 2 })}` : '') + ` (${Math.round(o.n / rows.length * 100)}%)`)); if (e.length > (top || 15)) lines.push(`…y ${e.length - (top || 15)} más.`); }
   else if (wantList || top) { const sh = d.head.map((_, i) => i).filter(i => rows.some(r => String(r[i] ?? '').trim())).slice(0, 5); rows.slice(0, top || 10).forEach(r => lines.push('• ' + sh.map(i => r[i]).filter(x => String(x).trim()).join(' · '))); if (rows.length > (top || 10)) lines.push(`…y ${rows.length - (top || 10)} más (pídeme «exporta» para el Excel).`); }
   if (wantX && rows.length) loadLib('lib/xlsx.full.min.js?v=1', 'XLSX').then(() => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([d.head, ...rows]), 'Datos'); XLSX.writeFile(wb, d.name.replace(/\.[^.]+$/, '') + '_filtrado.xlsx'); }).catch(e => toast(e.message, 'err'));
-  return { text: out + (lines.length ? '\n' + lines.join('\n') : '') + (wantX && rows.length ? `\n📥 Descargando Excel con ${rows.length} registro(s).` : '') + (d.data.length < d.rows ? `\n(Analizado sobre las primeras ${d.data.length} filas guardadas.)` : ''), count: rows.length };
+  return { text: out + (lines.length ? '\n' + lines.join('\n') : '') + (wantX && rows.length ? `\n📥 Descargando Excel con ${rows.length} registro(s).` : '') , count: rows.length };
+}
+/* la base completa (sin límite de filas) se lee del archivo original guardado y queda en memoria */
+const FULL = new Map();
+async function fullOf(d) {
+  if (FULL.has(d.id)) return FULL.get(d.id); const f = S.attachments.find(a => a.project_id === d.id); if (!f) return d;
+  try { const r = await sb.storage.from('attachments').download(f.path); if (r.error) throw r.error;
+    const all = await readTable(new File([r.data], d.name)), sh = (all.sheets || [{ rows: all }]).find(s => s.name === d.sheet) || (all.sheets || [{ rows: all }]).find(s => (s.rows[0] || []).join('|') === d.head.join('|')) || { rows: all };
+    const x = { ...d, data: sh.rows.slice(1).filter(r => r.some(v => String(v).trim())) }; x.rows = x.data.length; FULL.set(d.id, x); return x; } catch (e) { return d; }
+}
+/* análisis automático de una base: calidad, distribución, montos, fechas y horas pico, hallazgos */
+function analyze(d, text) {
+  const n = norm(text || ''), H = d.head, R = d.data, T = R.length, out = [`📊 Análisis de «${d.name}» · ${T.toLocaleString('es-CR')} registros · ${H.length} columnas`], ins = [];
+  const pct = x => Math.round(x / (T || 1) * 100) + '%', only = H.map((x, i) => i).filter(i => !n.includes('columna') || n.includes(norm(H[i])));
+  only.forEach(i => { const v = R.map(r => String(r[i] ?? '').trim()), filled = v.filter(Boolean), emp = T - filled.length, dist = new Set(filled);
+    if (!filled.length) { out.push(`\n▪ ${H[i]}: vacía`); return; }
+    const dates = filled.map(parseD).filter(Boolean);
+    if (dates.length / filled.length > .8) { const s = dates.slice().sort((a, b) => a - b), byDay = new Map(), byMonth = new Map(), byWd = new Array(7).fill(0), byHr = new Array(24).fill(0); let hrs = 0;
+      filled.forEach((x, j) => { const dt = parseD(x); if (!dt) return; const k = dt.toLocaleDateString('es-CR'); byDay.set(k, (byDay.get(k) || 0) + 1); const mk = MESES[dt.getMonth()] + ' ' + dt.getFullYear(); byMonth.set(mk, (byMonth.get(mk) || 0) + 1); byWd[dt.getDay()]++;
+        const hm = x.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])?\.?\s*m?/i); if (hm) { let hh = +hm[1]; if (hm[3]) { const pm = /p/i.test(hm[3]); if (pm && hh < 12) hh += 12; if (!pm && hh === 12) hh = 0; } byHr[hh]++; hrs++; } });
+      const topD = [...byDay].sort((a, b) => b[1] - a[1])[0], wd = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'], wmax = byWd.indexOf(Math.max(...byWd));
+      out.push(`\n▪ ${H[i]} (fecha): del ${s[0].toLocaleDateString('es-CR')} al ${s[s.length - 1].toLocaleDateString('es-CR')} · ${byDay.size} días · promedio ${(dates.length / byDay.size).toFixed(1)} por día`);
+      out.push(`  Por mes: ${[...byMonth].map(([k, c]) => `${k}: ${c}`).join(' · ')}`); out.push(`  Día con más registros: ${topD[0]} (${topD[1]}) · día de la semana más cargado: ${wd[wmax]} (${pct(byWd[wmax])})`);
+      if (hrs) { const hmx = byHr.indexOf(Math.max(...byHr)); out.push(`  Hora pico: ${hmx}:00–${hmx + 1}:00 (${byHr[hmx]} registros, ${Math.round(byHr[hmx] / hrs * 100)}%)`); ins.push(`La mayor carga es a las ${hmx}:00 y los ${wd[wmax]}.`); }
+      return; }
+    const nums = filled.map(num).filter(x => x != null && !isNaN(x)), isId = /\bid\b|registro|telefono|cedula|numero|codigo|cuenta/.test(norm(H[i])) || (dist.size > T * .9 && T >= 20 && !filled.every(x => num(x) != null && !isNaN(num(x))));
+    if (nums.length / filled.length > .9 && !isId) { const s = nums.reduce((a, b) => a + b, 0), so = nums.slice().sort((a, b) => a - b), med = so[Math.floor(so.length / 2)];
+      out.push(`\n▪ ${H[i]} (número): total ${s.toLocaleString('es-CR', { maximumFractionDigits: 2 })} · promedio ${(s / nums.length).toLocaleString('es-CR', { maximumFractionDigits: 2 })} · mediana ${med.toLocaleString('es-CR')} · mín ${so[0].toLocaleString('es-CR')} · máx ${so[so.length - 1].toLocaleString('es-CR')}` + (emp ? ` · ${pct(emp)} vacíos` : '')); return; }
+    if (isId) { const dup = filled.length - dist.size; out.push(`\n▪ ${H[i]} (identificador): ${dist.size.toLocaleString('es-CR')} únicos` + (dup ? ` · ⚠️ ${dup} repetidos` : '') + (emp ? ` · ${pct(emp)} vacíos` : '')); if (dup) ins.push(`«${H[i]}» tiene ${dup} valores repetidos (posibles duplicados o reincidencias).`); return; }
+    const cnt = new Map(); filled.forEach(x => cnt.set(x, (cnt.get(x) || 0) + 1)); const e = [...cnt].sort((a, b) => b[1] - a[1]);
+    if (dist.size <= 60) { out.push(`\n▪ ${H[i]}: ${dist.size} valores` + (emp ? ` · ${pct(emp)} vacíos` : '') + '\n  ' + e.slice(0, 6).map(([k, c]) => `${k}: ${c.toLocaleString('es-CR')} (${pct(c)})`).join(' · ') + (e.length > 6 ? ` · otros ${e.length - 6}` : ''));
+      if (e[0][1] / T > .5 && dist.size > 1) ins.push(`En «${H[i]}» predomina «${e[0][0]}» con ${pct(e[0][1])}.`); }
+    else out.push(`\n▪ ${H[i]} (texto libre): ${dist.size.toLocaleString('es-CR')} valores distintos` + (emp ? ` · ${pct(emp)} vacíos` : '') + (e[0][1] > 1 ? ` · más repetido: «${String(e[0][0]).slice(0, 60)}» (${e[0][1]})` : ''));
+    if (emp / T > .3) ins.push(`«${H[i]}» está vacía en ${pct(emp)} de los registros (revisar calidad del dato).`); });
+  // cruces entre categorías clave (ej. estado por skill)
+  const cats = H.map((_, i) => i).filter(i => { const s = new Set(R.map(r => r[i]).filter(Boolean)).size; return s >= 2 && s <= 12 && s < T * .5 && !/\bid\b|registro|telefono|fecha|hora|creado/.test(norm(H[i])) && !R.slice(0, 50).some(r => parseD(r[i])); });
+  if (cats.length >= 2 && !n.includes('columna')) { const [a1, b1] = cats; const m = new Map(); R.forEach(r => { const k = r[a1] || '(vacío)'; const o = m.get(k) || new Map(); o.set(r[b1] || '(vacío)', (o.get(r[b1] || '(vacío)') || 0) + 1); m.set(k, o); });
+    out.push(`\n▪ Cruce ${H[a1]} × ${H[b1]}:`); [...m].sort((x, y) => [...y[1].values()].reduce((s, v) => s + v, 0) - [...x[1].values()].reduce((s, v) => s + v, 0)).slice(0, 8).forEach(([k, o]) => out.push(`  ${k}: ` + [...o].sort((x, y) => y[1] - x[1]).map(([kk, c]) => `${kk} ${c}`).join(' · '))); }
+  if (ins.length) out.push('\n💡 Hallazgos:\n' + ins.slice(0, 8).map(x => '• ' + x).join('\n'));
+  return out.join('\n');
 }
 function guessCol(head, words) { const i = head.findIndex(x => words.some(w => norm(x).includes(w))); return i < 0 ? '' : String(i); }
 async function dataCenter(m) {
@@ -1159,7 +1201,7 @@ async function dataCenter(m) {
       h('label', { class: 'check' }, h('input', { type: 'checkbox', id: 'dc-new', checked: true }), 'Si un responsable no existe en la oficina, agregarlo como integrante'),
       ro ? null : h('div', { style: 'display:flex;gap:8px;justify-content:flex-end' }, h('button', { class: 'btn', onclick: () => area.replaceChildren() }, 'Cancelar'),
         h('button', { class: 'btn', id: 'dc-save', onclick: async e => { e.currentTarget.disabled = true;
-          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: 0, head, charts, data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
+          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: 0, head, charts, sheet: all.sheets ? all.sheets[si].name : '', data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
           await upload({ id: ds.id }, [file], () => {}); toast('Base guardada: el supervisor ya puede consultarla en el chat', 'ok'); render(); } }, '💾 Solo guardar la base'),
         h('button', { class: 'btn primary', id: 'dc-gen', onclick: async e => {
           e.currentTarget.disabled = true; const gv = id => $('#' + id).value, ti = gv('dc-title'), wi = gv('dc-who'), di = gv('dc-due'), de = gv('dc-desc'), pi = gv('dc-prio'), mk = $('#dc-new').checked;
@@ -1173,7 +1215,7 @@ async function dataCenter(m) {
             rowsOut.push({ title: title.slice(0, 200), body: de !== '' ? String(r[de] ?? '') : '', col_id: col.id, due, prio: pr.startsWith('a') || pr.startsWith('h') ? 'alta' : pr.startsWith('b') || pr.startsWith('l') ? 'baja' : 'media', done: false, is_task: true, from: 'data', position: nextPos(cardsOf(col.id)) + rowsOut.length, author: S.user.id }); }
           if (!rowsOut.length) { e.currentTarget.disabled = false; return toast('No se encontraron tareas en esa columna', 'err'); }
           const ins = await q(sb.from('kcards').insert(rowsOut).select()); S.kcards.push(...ins);
-          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: ins.length, head, charts, data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
+          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: ins.length, head, charts, sheet: all.sheets ? all.sheets[si].name : '', data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
           await upload({ id: ds.id }, [file], () => {});
           toast(`${ins.length} tareas generadas y asignadas`, 'ok'); S.otab = 'office'; render();
         } }, '⚡ Generar tareas'))));
@@ -1181,7 +1223,7 @@ async function dataCenter(m) {
   m.append(h('section', { class: 'card' }, h('h2', {}, 'Centro de datos'), h('p', { class: 'muted' }, 'Sube una base de datos y la oficina convierte cada fila en una tarea asignada al integrante que corresponda.'), ro ? null : h('div', {}, zone, pick)), area,
     h('section', { class: 'card', style: 'margin-top:14px' }, h('h2', {}, 'Bases cargadas'), sets.length ? sets.map(d => { const f = S.attachments.find(a => a.project_id === d.id);
       return h('div', { class: 'file' }, h('span', { class: 'ext', style: 'background:var(--green)' }, (d.name.split('.').pop() || '').slice(0, 4)), h('div', { class: 'fi' }, h('b', {}, d.name), h('span', { class: 'muted' }, `${d.rows} filas · ${d.tasks} tareas generadas · ${new Date(d.created_at).toLocaleString('es-CR')}`)),
-        d.head ? h('button', { class: 'btn', onclick: () => openCharts(d) }, '📊 Gráficos') : null, f ? h('button', { class: 'btn', onclick: () => viewFile(f) }, 'Ver') : null, f ? h('button', { class: 'btn', onclick: () => downloadFile(f) }, 'Descargar') : null); }) : h('p', { class: 'muted' }, 'Aún no has cargado bases de datos.')));
+        d.head ? h('button', { class: 'btn', onclick: async () => openCharts(await fullOf(d)) }, '📊 Gráficos') : null, f ? h('button', { class: 'btn', onclick: () => viewFile(f) }, 'Ver') : null, f ? h('button', { class: 'btn', onclick: () => downloadFile(f) }, 'Descargar') : null); }) : h('p', { class: 'muted' }, 'Aún no has cargado bases de datos.')));
 }
 
 function chatBubble(m) {
