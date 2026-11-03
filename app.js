@@ -560,13 +560,26 @@ async function taskForm(c, k) {
     { name: 'title', label: 'Tarea', value: k?.title || '', required: true }, { name: 'body', label: 'Detalle', type: 'textarea', value: k?.body || '' },
     { name: 'who', label: 'Responsable', type: 'select', value: k?.col_id || c.id, options: team().map(m => ({ value: m.id, label: `${m.name} · ${m.role || 'Sin rol'}` })) },
     { name: 'due', label: 'Fecha límite', type: 'date', value: k?.due || '' },
+    { name: 'progress', label: 'Avance (%)', type: 'number', value: k?.done ? 100 : (k?.progress ?? 0) },
     { name: 'prio', label: 'Prioridad', type: 'select', value: k?.prio || 'media', options: [{ value: 'alta', label: 'Alta' }, { value: 'media', label: 'Media' }, { value: 'baja', label: 'Baja' }] },
     { name: 'done', label: 'Estado', type: 'select', value: k?.done ? 'yes' : 'no', options: [{ value: 'no', label: 'Pendiente' }, { value: 'yes', label: 'Hecha' }] }], k ? 'Guardar' : 'Asignar');
   if (!r) return;
-  const v = { title: r.title.trim(), body: r.body.trim(), col_id: r.who, due: r.due || null, prio: r.prio, done: r.done === 'yes', is_task: true };
+  const pg = Math.max(0, Math.min(100, num(r.progress) || 0)), v = { title: r.title.trim(), body: r.body.trim(), col_id: r.who, due: r.due || null, prio: r.prio, progress: r.done === 'yes' ? 100 : pg, done: r.done === 'yes' || pg >= 100, is_task: true };
   if (k) { Object.assign(k, v); render(); await q(sb.from('kcards').update(v).eq('id', k.id)); }
   else { const [row] = await q(sb.from('kcards').insert({ ...v, position: nextPos(cardsOf(r.who)), author: S.user.id, from: 'office' }).select()); S.kcards.push(row); render(); toast('Tarea asignada', 'ok'); }
   if (S.omember) openMember(S.kcols.find(x => x.id === S.omember));
+}
+function taskPopup(anchor, c) {
+  const ks = cardsOf(c.id).filter(k => k.is_task).sort((a, b) => (a.done - b.done) || String(a.due || '9').localeCompare(String(b.due || '9'))), ro = !canEdit();
+  const pctOf = k => k.done ? 100 : (num(k.progress) || 0), avg = ks.length ? Math.round(ks.reduce((s, k) => s + pctOf(k), 0) / ks.length) : 0;
+  const box = h('div', { class: 'tk-pop' }, h('div', { class: 'tk-head' }, h('b', {}, c.name), h('span', { class: 'muted' }, `Avance general ${avg}%`)), h('div', { class: 'bar' }, h('i', { style: `width:${avg}%` })),
+    ks.length ? ks.map(k => { const p = pctOf(k), lbl = h('em', {}, p + '%'), fill = h('i', { style: `width:${p}%;background:${p >= 100 ? 'var(--green)' : c.color}` });
+      return h('div', { class: 'tk' + (k.done ? ' done' : '') }, h('div', { class: 'tk-t' }, h('span', {}, k.title), lbl), h('div', { class: 'bar' }, fill),
+        k.due ? h('small', { class: 'muted' }, 'Vence ' + new Date(k.due + 'T00:00').toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })) : null,
+        ro ? null : h('input', { type: 'range', min: 0, max: 100, step: 5, value: p, 'aria-label': 'Avance de ' + k.title, oninput: e => { lbl.textContent = e.target.value + '%'; fill.style.width = e.target.value + '%'; },
+          onchange: e => { const v = +e.target.value; setCard(k, { progress: v, done: v >= 100 }); } })); }) : h('p', { class: 'muted' }, 'Sin tareas asignadas.'),
+    h('button', { class: 'btn', style: 'width:100%;margin-top:8px', onclick: () => { closePop(); openMember(c); } }, 'Abrir ficha completa'));
+  pop(anchor, box); popEl.classList.add('wide');
 }
 function memberStats(c) { const ks = cardsOf(c.id).filter(k => k.is_task), today = new Date(new Date().toDateString());
   return { pend: ks.filter(k => !k.done).length, done: ks.filter(k => k.done).length, late: ks.filter(k => !k.done && k.due && dOf(k.due) < today).length, total: ks.length }; }
@@ -669,11 +682,13 @@ function office3D(wrap, members) {
     g.fillStyle = '#fff'; g.font = 'bold 26px Montserrat,sans-serif'; g.fillText('Pipeline', 20, 42); g.font = '21px Montserrat,sans-serif'; g.fillText('Retorno ' + fmtMoney(tt.ret), 20, 92); g.fillText('Costo ' + fmtMoney(tt.cost), 20, 128);
     g.fillText(`Seguimientos: ${segP.length} · ${segL} atrasados`, 20, 164); g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(20, 200, 400, 14); g.fillStyle = '#ED7F32'; g.fillRect(20, 200, 4 * tt.prog, 14); }) }));
   tv.position.set(15.2 - (30 - FW), 4.6, -FD / 2 + 0.25); tv.userData.go = 'board'; scene.add(tv); box(4.7, 2.8, 0.15, 0x111111, tv.position.x, 4.6, -FD / 2 + 0.15);
+  const deskObjs = [], obstStart = scene.children.length;
   // sala de reuniones y oficina CEO de vidrio
-  const room = (x, z, w, d) => { [[x, z - d / 2, w, 0.12], [x, z + d / 2, w, 0.12]].forEach(([xx, zz, ww, dd]) => box(ww, 3, dd, glass, xx, 1.8, zz)); [x - w / 2, x + w / 2].forEach(xx => box(0.12, 3, d, glass, xx, 1.8, z)); box(w, 0.1, 0.16, 0x84858a, x, 3.3, z + d / 2); box(0.16, 0.1, d, 0x84858a, x + w / 2, 3.3, z); };
+  const room = (x, z, w, d) => { box(w, 3, 0.12, glass, x, 1.8, z - d / 2); const sg = (w - 2.4) / 2; box(sg, 3, 0.12, glass, x - w / 2 + sg / 2, 1.8, z + d / 2); box(sg, 3, 0.12, glass, x + w / 2 - sg / 2, 1.8, z + d / 2); [x - w / 2, x + w / 2].forEach(xx => box(0.12, 3, d, glass, xx, 1.8, z)); box(w, 0.1, 0.16, 0x84858a, x, 3.3, z + d / 2); box(0.16, 0.1, d, 0x84858a, x + w / 2, 3.3, z); };
   const mx = FW / 2 - 5, mz = -FD / 2 + 4; room(mx, mz, 8, 6); const mt = box(4.4, 0.25, 2.2, 0xffffff, mx, 1.4, mz); mt.userData.go = 'board'; cyl(0.15, 1.2, 0x84858a, mx, 0.8, mz);
   for (let i = -1; i <= 1; i += 2) for (let j = -1; j <= 1; j++) { box(0.75, 0.15, 0.75, 0x2f333c, mx + j * 1.45, 0.95, mz + i * 1.6); box(0.75, 0.7, 0.12, 0x2f333c, mx + j * 1.45, 1.35, mz + i * 1.95); }
   const cx = -FW / 2 + 5.2, cz = FD / 2 - 4; room(cx, cz, 8, 6.5); box(7, 0.04, 5, 0x7128b7, cx, 0.27, cz + 0.2);
+  scene.children.slice(obstStart).forEach(o => { if (o.isMesh) o.userData.obst = true; });
   // elementos de oficina (personalizables)
   const saved = S.settings[officeKey()], items = saved?.items?.length ? saved.items : defaultItems(FW, FD), itemObjs = [];
   const build = it => { const g = new T.Group(), p = g;
@@ -705,7 +720,7 @@ function office3D(wrap, members) {
     const s1 = lap(-0.3); if (big) lap(1.2); cyl(0.12, 0.25, PALETTE[(x * 7 | 0) % PALETTE.length], w / 2 - 0.45, 1.82, 0, g);
     if (!big) sph(0.22, 0x3f886b, -w / 2 + 0.35, 1.9, 0.3, g);
     box(1, 0.14, 1, 0x2f333c, 0, 1.0, -1.25, g); box(1, 1, 0.14, 0x2f333c, 0, 1.55, -1.75, g); cyl(0.07, 0.75, 0x84858a, 0, 0.55, -1.25, g); g.userData.faceFix = true;
-    g.position.set(x, 0.25, z); g.traverse(o => { o.userData.member = m.id; }); scene.add(g);
+    g.position.set(x, 0.25, z); g.traverse(o => { o.userData.member = m.id; }); scene.add(g); deskObjs.push(g);
     if (memberStats(m).late) { const l = new T.PointLight(0xff3b30, 1.4, 4.5); l.position.set(x, 3, z); scene.add(l); }
     deskFor.set(m.id, { seat: new T.Vector3(x, 0, z - 1.05), aisle: z - 2.7, screen: s1 }); };
   if (ceo) desk(cx, cz - 0.2, ceo, true);
@@ -740,15 +755,34 @@ function office3D(wrap, members) {
   };
   const pois = () => itemObjs.filter(g => WALK_TO.includes(g.userData.item.type)).map(g => { const v = new T.Vector3(); g.getWorldPosition(v); const r = g.rotation.y; return new T.Vector3(v.x + Math.sin(r) * 1.6, 0, v.z + Math.cos(r) * 1.6); });
   const SAY = { printer: 'Imprimiendo…', rack: 'Revisando servidores', coffee: '☕ Café', cooler: '💧 Agua', sofa: 'Pausa activa', shelf: 'Buscando un libro', table: 'Reunión rápida', board: 'Planeando', cabinet: 'Buscando archivos' };
-  members.forEach(m => { const d = deskFor.get(m.id); if (!d) return; const f = figure(m); f.d = d; f.state = 'sit'; f.timer = 4 + Math.random() * 10; f.path = []; f.root.position.copy(d.seat); figs.push(f); });
-  const setSit = (f, on) => { f.body.position.y = on ? -0.55 : 0; f.hipL.rotation.x = f.hipR.rotation.x = on ? -Math.PI / 2 : 0; };
+  members.forEach(m => { const d = deskFor.get(m.id); if (!d) return; const f = figure(m); f.d = d; f.state = 'sit'; f.timer = 8 + Math.random() * 40; f.path = []; f.root.position.copy(d.seat); f.root.position.y = 0.25; figs.push(f); });
+  const setSit = (f, on) => { f.body.position.y = on ? 0.22 : 0; f.hipL.rotation.x = f.hipR.rotation.x = on ? -Math.PI / 2 : 0; };
   figs.forEach(f => { setSit(f, true); f.root.rotation.y = 0; f.sub = 'type'; f.subT = Math.random() * 4; if (f.m.supervisor) f.timer = 2; });
   const nearPoi = () => { const ps = pois(); if (!ps.length) return null; const i = Math.floor(Math.random() * ps.length), g = itemObjs.filter(o => WALK_TO.includes(o.userData.item.type))[i]; return { p: ps[i], type: g.userData.item.type }; };
   const topTask = m => cardsOf(m.id).filter(k => k.is_task && !k.done).sort((x, y) => String(x.due || '9').localeCompare(String(y.due || '9')))[0];
   const say = (f, txt, ms) => { f.bubble.textContent = txt; f.bubble.classList.toggle('hidden', !txt); f.sayUntil = ms ? tAcc + ms / 1000 : 0; };
   const sup = () => figs.find(x => x.m.supervisor);
   const TALK = ['¿Cómo vas con eso?', 'Te paso el archivo', 'Listo, avanzo', '¿Lo revisamos juntos?', 'Ya casi termino', '¡Buena idea!', 'Hagamos la llamada'];
-  const goTo = (f, p, goal) => { const s = f.root.position; f.goal = goal; f.path = [new T.Vector3(s.x, 0, f.d.aisle), new T.Vector3(p.x, 0, f.d.aisle), p.clone()]; f.state = 'walk'; setSit(f, false); };
+  // --- navegación: cuadrícula con obstáculos (no atraviesan escritorios ni elementos) ---
+  const G = 0.5, gw = Math.ceil(FW / G), gd = Math.ceil(FD / G), blocked = new Uint8Array(gw * gd);
+  const cellOf = (x, z) => [Math.max(0, Math.min(gw - 1, Math.floor((x + FW / 2) / G))), Math.max(0, Math.min(gd - 1, Math.floor((z + FD / 2) / G)))];
+  const ctr = (i, j) => new T.Vector3(-FW / 2 + (i + 0.5) * G, 0.25, -FD / 2 + (j + 0.5) * G);
+  const bb = new T.Box3();
+  const markObj = (o, pad = 0.35) => { bb.setFromObject(o); if (bb.isEmpty() || bb.max.y - bb.min.y < 0.15 || bb.max.y < 0.6) return; const [i0, j0] = cellOf(bb.min.x - pad, bb.min.z - pad), [i1, j1] = cellOf(bb.max.x + pad, bb.max.z + pad); for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) blocked[j * gw + i] = 1; };
+  const rebuildNav = () => { blocked.fill(0); for (let i = 0; i < gw; i++) { blocked[i] = blocked[(gd - 1) * gw + i] = 1; } for (let j = 0; j < gd; j++) { blocked[j * gw] = blocked[j * gw + gw - 1] = 1; }
+    scene.children.forEach(o => { if (o.isMesh && o.userData.obst) markObj(o, 0.25); }); itemObjs.forEach(o => { if (o.userData.item.type !== 'rug') markObj(o); }); deskObjs.forEach(o => markObj(o, 0.3)); };
+  const free = (i, j) => i >= 0 && j >= 0 && i < gw && j < gd && !blocked[j * gw + i];
+  const nearFree = v => { const [i0, j0] = cellOf(v.x, v.z); if (free(i0, j0)) return [i0, j0]; for (let r = 1; r < 12; r++) for (let di = -r; di <= r; di++) for (let dj = -r; dj <= r; dj++) if ((Math.abs(di) === r || Math.abs(dj) === r) && free(i0 + di, j0 + dj)) return [i0 + di, j0 + dj]; return [i0, j0]; };
+  const astar = (s, e) => { const N = gw * gd, gS = new Float32Array(N).fill(1e9), came = new Int32Array(N).fill(-1), open = [], si = s[1] * gw + s[0], ei = e[1] * gw + e[0], H = i => { const dx = Math.abs(i % gw - e[0]), dz = Math.abs((i / gw | 0) - e[1]); return dx + dz - 0.59 * Math.min(dx, dz); };
+    gS[si] = 0; open.push([H(si), si]); const closed = new Uint8Array(N); let it = 0;
+    while (open.length && it++ < 20000) { let bi = 0; for (let k = 1; k < open.length; k++) if (open[k][0] < open[bi][0]) bi = k; const [, c] = open.splice(bi, 1)[0]; if (c === ei) break; if (closed[c]) continue; closed[c] = 1;
+      const ci = c % gw, cj = c / gw | 0; for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) { if (!di && !dj) continue; const ni = ci + di, nj = cj + dj; if (!free(ni, nj) || (di && dj && (!free(ci + di, cj) || !free(ci, cj + dj)))) continue;
+        const n = nj * gw + ni, g2 = gS[c] + (di && dj ? 1.414 : 1); if (g2 < gS[n]) { gS[n] = g2; came[n] = c; open.push([g2 + H(n), n]); } } }
+    const out = []; let c = ei; if (came[c] < 0 && c !== si) return null; while (c !== si && c >= 0) { out.push(c); c = came[c]; } out.reverse();
+    const pts = out.map(n => ctr(n % gw, n / gw | 0)); return pts.filter((p, k) => k === pts.length - 1 || k % 2 === 1); };
+  rebuildNav();
+  const plan = (from, to) => { const a2 = nearFree(from), b2 = nearFree(to), mid = astar(a2, b2) || []; const p1 = ctr(...a2); return [p1, ...mid, to.clone().setY(0.25)]; };
+  const goTo = (f, p, goal) => { f.goal = goal; f.path = plan(f.root.position, p); f.state = 'walk'; setSit(f, false); };
   const startWalk = f => {
     if (f.m.supervisor) { // el supervisor recorre los puestos dando instrucciones
       const q2 = (S.supQ || []).shift(), list = figs.filter(o => o !== f && !o.m.ceo), o = q2 ? figs.find(x => x.m.id === q2.id) : list[Math.floor(Math.random() * list.length)];
@@ -760,7 +794,7 @@ function office3D(wrap, members) {
     if (r < 0.3 && k) { const pr = itemObjs.filter(g => g.userData.item.type === 'printer'); if (pr.length) { const g = pr[Math.floor(Math.random() * pr.length)], v = new T.Vector3(); g.getWorldPosition(v); const rr = g.rotation.y; return goTo(f, new T.Vector3(v.x + Math.sin(rr) * 1.6, 0, v.z + Math.cos(rr) * 1.6), { type: 'printer', doc: k.title }); } }
     if (r < 0.6 && figs.length > 2) { const o = figs.filter(x => x !== f && x.state === 'sit' && !x.m.supervisor)[Math.floor(Math.random() * figs.length)]; if (o) return goTo(f, new T.Vector3(o.d.seat.x + 1.1, 0, o.d.seat.z - 0.9), { type: 'colega', who: o }); }
     const t = nearPoi(); if (!t) { f.timer = 5; return; } goTo(f, t.p, t); };
-  const backWalk = f => { const s = f.d.seat; f.path = [new T.Vector3(f.root.position.x, 0, f.d.aisle), new T.Vector3(s.x, 0, f.d.aisle), s.clone()]; f.state = 'return';
+  const backWalk = f => { const s = f.d.seat; f.path = plan(f.root.position, s); f.state = 'return';
     setSit(f, false); if (f.goal?.type === 'printer') { f.paper.visible = true; say(f, '📄 Llevando «' + String(f.goal.doc || '').slice(0, 26) + '»'); } else say(f, ''); };
   const arrive = f => { const g = f.goal; f.state = 'visit'; f.timer = 4 + Math.random() * 4;
     if (g.type === 'printer') say(f, '🖨 Imprimiendo «' + String(g.doc || '').slice(0, 26) + '»');
@@ -768,11 +802,11 @@ function office3D(wrap, members) {
     else if (g.type === 'ask') { const o = g.who; o.face = f; f.timer = 6; say(f, '❓ ¿Cómo avanzo con «' + String(g.doc || '').slice(0, 22) + '»?'); setTimeout(() => say(o, '💡 ' + ['Empieza por lo urgente', 'Pídele los datos a Laura', 'Revísalo conmigo en la tarde', 'Prioriza esa, va primero', 'Usa la plantilla del Material'][Math.floor(Math.random() * 5)], 3500), 2000); }
     else if (g.type === 'colega') { const o = g.who; o.face = f; say(f, '💬 ' + TALK[Math.floor(Math.random() * TALK.length)]); setTimeout(() => say(o, '💬 ' + TALK[Math.floor(Math.random() * TALK.length)], 3000), 1600); }
     else say(f, SAY[g.type] || ''); };
-  const atDesk = f => { f.state = 'sit'; f.timer = f.m.supervisor ? 4 + Math.random() * 4 : 12 + Math.random() * 18; if (f.m.supervisor) { f.sub = 'think'; f.subT = 3; say(f, '🗂 Revisando avances del equipo', 3000); } setSit(f, true); f.root.position.copy(f.d.seat); f.root.rotation.y = 0;
+  const atDesk = f => { f.state = 'sit'; f.timer = f.m.supervisor ? 6 + Math.random() * 6 : 30 + Math.random() * 40; if (f.m.supervisor) { f.sub = 'think'; f.subT = 3; say(f, '🗂 Revisando avances del equipo', 3000); } setSit(f, true); f.root.position.copy(f.d.seat); f.root.position.y = 0.25; f.root.rotation.y = 0;
     if (f.paper.visible) { f.paper.visible = false; box(0.5, 0.06, 0.65, 0xffffff, f.d.seat.x + 0.9, 1.95, f.d.seat.z + 1, scene); } say(f, ''); f.sub = 'type'; f.subT = 3; };
   // etiquetas
   const labels = members.map(m => { const st = memberStats(m); const el = h('button', { class: 'of-label' + (st.late ? ' late' : ''), style: `--c:${m.color}`, title: `${m.name} · ${m.role || 'Sin rol'} · ${st.pend} pendientes` + (st.late ? ` · ${st.late} atrasadas` : ''), onclick: () => openMember(m) },
-    h('b', {}, (m.ceo ? '👑 ' : '') + m.name.split(' ')[0]), st.pend ? h('i', {}, st.pend) : null, h('span', {}, m.role || 'Sin rol')); wrap.append(el); return { el, m }; });
+    h('b', {}, (m.ceo ? '👑 ' : '') + m.name.split(' ')[0]), h('i', { class: 'of-tk', role: 'button', title: 'Ver tareas y avance', onclick: e => { e.stopPropagation(); taskPopup(e.currentTarget, m); } }, '📋 ' + st.pend), h('span', {}, m.role || 'Sin rol')); wrap.append(el); return { el, m }; });
   const proj = (v, el, dy = 0) => { const p = v.clone(); p.project(cam); el.style.left = ((p.x + 1) / 2 * wrap.clientWidth) + 'px'; el.style.top = ((1 - p.y) / 2 * wrap.clientHeight + dy) + 'px'; };
   // controles + modo edición de elementos
   let drag = null, pinch = null, sel = null; const el = renderer.domElement, ray = new T.Raycaster(), mv = new T.Vector2(), floor = new T.Plane(new T.Vector3(0, 1, 0), -0.25), hitP = new T.Vector3();
@@ -790,7 +824,7 @@ function office3D(wrap, members) {
     if (drag.pan) { const s = 0.05 / zoom; target.x = drag.tx - (dx * Math.cos(theta) + dy * Math.sin(theta)) * s; target.z = drag.tz - (-dx * Math.sin(theta) + dy * Math.cos(theta)) * s; }
     else { theta = drag.t - dx * 0.008; phi = Math.max(0.25, Math.min(1.35, drag.p + dy * 0.006)); } setCam(); });
   el.addEventListener('pointerup', e => {
-    if (drag?.item) { if (drag.moved) { const it = drag.item.userData.item; it.x = drag.item.position.x; it.z = drag.item.position.z; saveItems(); } drag = null; return; }
+    if (drag?.item) { if (drag.moved) { const it = drag.item.userData.item; it.x = drag.item.position.x; it.z = drag.item.position.z; saveItems(); rebuildNav(); } drag = null; return; }
     if (drag && !drag.moved && !S.oEdit) { const hits = pick(e), mo = objOf(hits, 'member'), go2 = objOf(hits, 'go'); if (mo) openMember(S.kcols.find(x => x.id === mo.userData.member)); else if (go2) go(go2.userData.go); }
     else if (drag && !drag.moved && S.oEdit) showSel(null);
     drag = null; });
@@ -819,7 +853,7 @@ function office3D(wrap, members) {
       else if (f.state === 'walk' || f.state === 'return') { f.shR.rotation.z = 0; f.head.rotation.z = 0; const tgt = f.path[0];
         if (!tgt) { if (f.state === 'walk') arrive(f); else atDesk(f); return; }
         tmp.subVectors(tgt, pos); tmp.y = 0; const dist = tmp.length(), sp = (f.m.supervisor ? 3 : 2.6) * dt;
-        if (dist < sp) { pos.x = tgt.x; pos.z = tgt.z; f.path.shift(); } else { tmp.normalize(); pos.x += tmp.x * sp; pos.z += tmp.z * sp; const ang = Math.atan2(tmp.x, tmp.z); f.root.rotation.y += ((ang - f.root.rotation.y + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 10); }
+        pos.y = 0.25; if (dist < sp) { pos.x = tgt.x; pos.z = tgt.z; f.path.shift(); } else { tmp.normalize(); pos.x += tmp.x * sp; pos.z += tmp.z * sp; const ang = Math.atan2(tmp.x, tmp.z); f.root.rotation.y += ((ang - f.root.rotation.y + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 10); }
         const sw = Math.sin(tAcc * 10) * 0.6; f.hipL.rotation.x = sw; f.hipR.rotation.x = -sw; f.shL.rotation.x = -sw * 0.8; f.shR.rotation.x = f.paper.visible ? -1.1 : sw * 0.8; f.body.position.y = Math.abs(Math.sin(tAcc * 10)) * 0.06; }
       else if (f.state === 'visit') { f.hipL.rotation.x = f.hipR.rotation.x = 0; const g = f.goal;
         if (g.who) { tmp.subVectors(g.who.root.position, pos); f.root.rotation.y = Math.atan2(tmp.x, tmp.z); f.shR.rotation.x = -0.6 + Math.sin(tAcc * 4) * 0.4; f.shL.rotation.x = Math.sin(tAcc * 3) * 0.2; }
@@ -847,7 +881,7 @@ async function distribute(tasks, silent) {
   const out = [];
   for (const k of tasks.sort((a, b) => String(a.due || '9').localeCompare(String(b.due || '9')))) { const w = pickWorker(k); if (!w) break; k.col_id = w.id; k.position = nextPos(cardsOf(w.id)); out.push([k, w]);
     await q(sb.from('kcards').update({ col_id: w.id, position: k.position }).eq('id', k.id)); (S.supQ = S.supQ || []).push({ id: w.id, text: `${w.name.split(' ')[0]}, te asigné «${String(k.title || '').slice(0, 30)}»` }); }
-  if (!silent) render(); return out;
+  if (!silent && !document.querySelector('.chat-log')) render(); return out;
 }
 const inbox = () => { const s = supervisorM(); return s ? cardsOf(s.id).filter(k => k.is_task && !k.done) : []; };
 function parseDue(t) {
@@ -866,7 +900,11 @@ async function supervisorReply(text) {
   const fmtK = k => `• ${k.title}` + (k.due ? ` (vence ${new Date(k.due + 'T00:00').toLocaleDateString('es-CR', { day: 'numeric', month: 'short' })})` : '');
   if (!ws.length) return 'Aún no hay personal en la oficina. Agrega integrantes en «Equipo y tareas» y yo me encargo de repartir el trabajo.';
   if (/^(hola|buen(os|as)|hey)/.test(n) && n.length < 25) return `¡Hola! Soy ${sm?.name || 'tu supervisor'}. Puedo asignar, repartir, reasignar y darte el estado del equipo. Escribe «ayuda» para ver ejemplos.`;
-  if (/ayuda|que puedes|comandos/.test(n)) return 'Puedes pedirme, por ejemplo:\n• «Asigna revisar contrato a Esteban para el viernes»\n• «Crea tarea preparar informe mensual mañana» (yo elijo a quién)\n• «Reparte los pendientes»\n• «Reasigna informe a Laura»\n• «Marca contrato como lista»\n• «¿Qué tiene pendiente Laura?»\n• «¿Quién está atrasado?» · «Resumen» · «¿Quién tiene más carga?»';
+  if (/ayuda|que puedes|comandos/.test(n)) return 'Puedes pedirme, por ejemplo:\n• «Distribuye: revisar contrato; preparar informe; llamar a Isoft» (las reparto yo)\n• «Asigna revisar contrato a Esteban para el viernes»\n• «Crea tarea preparar informe mensual mañana» (yo elijo a quién)\n• «Reparte los pendientes»\n• «Reasigna informe a Laura»\n• «Marca contrato como lista»\n• «¿Qué tiene pendiente Laura?»\n• «¿Quién está atrasado?» · «Resumen» · «¿Quién tiene más carga?»';
+  const lst = text.match(/^(?:distribuye|reparte|asigna(?:\s+estas)?(?:\s+tareas)?)\s*:\s*([\s\S]+)$/i);
+  if (lst) { const titles = lst[1].split(/\n|;|\s*\|\s*|(?:,\s*)(?=[A-ZÁÉÍÓÚÑ])/).map(s => s.replace(/^[-•*\d.)\s]+/, '').trim()).filter(s => s.length > 2); if (!titles.length) return 'Escribe las tareas separadas por punto y coma o en líneas distintas.';
+    const sv = supervisorM() || team()[0]; const rows = await q(sb.from('kcards').insert(titles.map((t, i) => ({ title: t.charAt(0).toUpperCase() + t.slice(1), body: 'Recibida por chat', col_id: sv.id, due: parseDue(t), prio: 'media', done: false, is_task: true, from: 'chat', position: nextPos(cardsOf(sv.id)) + i, author: S.user.id }))).select()); S.kcards.push(...rows);
+    const r = await distribute(rows); return `Recibí ${rows.length} tarea(s) y las repartí según la carga:\n` + r.map(([k, w]) => `• «${k.title}» → ${w.name}`).join('\n'); }
   if (/repart|distribu|balancea/.test(n)) { const ib = inbox(); if (!ib.length) return 'Mi bandeja está vacía: no hay pendientes sin asignar. Si quieres, crea tareas sin responsable y las reparto.'; const r = await distribute(ib); return `Listo, repartí ${r.length} pendiente(s) según la carga de cada uno:\n` + r.map(([k, w]) => `• «${k.title}» → ${w.name}`).join('\n') + '\nVoy a sus puestos a darles la instrucción.'; }
   if (/atrasad|vencid/.test(n)) { const L = []; ws.concat(sm ? [sm] : []).forEach(w => cardsOf(w.id).filter(k => k.is_task && !k.done && k.due && dOf(k.due) < today).forEach(k => L.push(`• ${w.name}: ${k.title}`))); return L.length ? `Hay ${L.length} tarea(s) atrasada(s):\n` + L.join('\n') + '\n¿Quieres que las reasigne o les dé prioridad?' : 'Nadie tiene tareas atrasadas. 🎉'; }
   if (/carga|ocupad|libre/.test(n)) { const r = ws.map(w => [w, memberStats(w)]).sort((a, b) => b[1].pend - a[1].pend); return 'Carga actual del equipo:\n' + r.map(([w, s]) => `• ${w.name} (${w.role || 'Sin rol'}): ${s.pend} pendiente(s)` + (s.late ? `, ${s.late} atrasada(s)` : '')).join('\n'); }
@@ -895,7 +933,8 @@ function chatPanel(m) {
   const send = async txt => { txt = (txt || inp.value).trim(); if (!txt) return; inp.value = ''; const a = hist().concat({ from: 'me', text: txt, t: new Date().toISOString() }); S.settings[key] = a; draw();
     const typing = h('div', { class: 'msg sup typing' }, h('div', { class: 'bub' }, h('p', {}, 'Escribiendo…'))); log.append(typing); log.scrollTop = log.scrollHeight;
     let r; try { r = await supervisorReply(txt); } catch (e) { r = 'Tuve un problema: ' + e.message; } await new Promise(ok => setTimeout(ok, 500));
-    save(hist().concat({ from: 'sup', text: r, t: new Date().toISOString() })); if (document.contains(log)) draw(); };
+    save(hist().concat({ from: 'sup', text: r, t: new Date().toISOString() })); (document.contains(log) ? draw : (S.chatDraw || draw))(); };
+  S.chatDraw = draw;
   inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
   const chips = ['Resumen', '¿Quién está atrasado?', 'Reparte los pendientes', '¿Quién tiene más carga?', 'Ayuda'];
   m.append(h('section', { class: 'chat card' }, h('header', { class: 'chat-head' }, h('span', { class: 'of-avatar', style: `--c:${sm?.color || '#003FF9'}` }, h('span', {}, initials(sm?.name || 'S'))), h('div', {}, h('b', {}, sm?.name || 'Supervisor'), h('small', { class: 'muted' }, `Supervisor · ${inbox().length} en bandeja`)),
@@ -1007,8 +1046,9 @@ function renderOffice(m) {
   const elemBar = ro ? null : h('div', { class: 'of-elems' }, h('button', { class: 'btn', onclick: e => menu(e.currentTarget, CATALOG.map(([k, l]) => ({ label: l, run: () => { if (!S.oEdit) { S.oEdit = true; render(); setTimeout(() => OF?.add(k), 600); } else OF?.add(k); } }))) }, h('span', { svg: I.plus }), 'Elemento'), editBtn,
     S.oEdit ? h('button', { class: 'btn ghost', onclick: async () => { if (await confirmBox('Restablecer', '¿Volver a la decoración original de la oficina?', 'Restablecer')) OF?.resetItems(); } }, 'Restablecer') : null, selBox);
   const ctl = h('div', { class: 'of-ctl' }, h('button', { class: 'btn', 'aria-label': 'Acercar', onclick: () => OF?.zoom(1.2) }, '+'), h('button', { class: 'btn', 'aria-label': 'Alejar', onclick: () => OF?.zoom(0.83) }, '−'), h('button', { class: 'btn', onclick: () => OF?.reset() }, 'Centrar'));
-  m.append(h('div', { class: 'toolbar' }, actions, elemBar, h('span', { class: 'muted' }, S.oEdit ? 'Modo edición: arrastra un elemento para moverlo · tócalo para rotarlo o eliminarlo' : 'Arrastra para girar · rueda o pellizco para zoom · Shift + arrastrar para mover · clic en una persona para ver sus tareas')), h('div', { class: 'of-stage' + (S.oEdit ? ' editing' : '') }, wrap, ctl));
-  loadLib('lib/three.min.js', 'THREE').then(() => { wrap.querySelector('.of-load')?.remove(); try { office3D(wrap, members); } catch (e) { wrap.replaceChildren(h('p', { class: 'muted', style: 'padding:20px' }, 'Tu navegador no pudo mostrar la oficina 3D. Usa la pestaña «Equipo y tareas».')); } })
+  const chatFab = h('button', { class: 'chat-fab', onclick: () => { const ex = document.querySelector('.chat-float'); if (ex) return ex.remove(); const box = h('div', { class: 'chat-float' }, h('button', { class: 'icon-btn chat-x', svg: I.x, 'aria-label': 'Cerrar', onclick: () => box.remove() })); document.body.append(box); chatPanel(box); } }, '💬 Supervisor');
+  m.append(chatFab, h('div', { class: 'toolbar' }, actions, elemBar, h('span', { class: 'muted' }, S.oEdit ? 'Modo edición: arrastra un elemento para moverlo · tócalo para rotarlo o eliminarlo' : 'Arrastra para girar · rueda o pellizco para zoom · Shift + arrastrar para mover · clic en una persona para ver sus tareas')), h('div', { class: 'of-stage' + (S.oEdit ? ' editing' : '') }, wrap, ctl));
+  loadLib('lib/three.min.js', 'THREE').then(() => { wrap.querySelector('.of-load')?.remove(); try { office3D(wrap, members); } catch (e) { console.error('office3D', e); wrap.replaceChildren(h('p', { class: 'muted', style: 'padding:20px' }, 'Tu navegador no pudo mostrar la oficina 3D. Usa la pestaña «Equipo y tareas».')); } })
     .catch(() => wrap.replaceChildren(h('p', { class: 'muted', style: 'padding:20px' }, 'No se pudo cargar el motor 3D.')));
 }
 
