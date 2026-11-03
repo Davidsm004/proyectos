@@ -944,6 +944,10 @@ async function supervisorCore(text, ctx) {
   // datos cargados en el Centro de datos
   const dsets = S.datasets.filter(d => d.author === S.user.id && d.head), dsOf = () => { const byName = dsets.find(d => n.includes(norm(d.name).replace(/\.[a-z]+$/, ''))); return byName || dsets.find(d => d.id === ctx.ds) || dsets.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0]; };
   if (/\b(bases?|datos cargados|archivos? de datos|dataset)\b/.test(n) && /(que|cuales|lista|tengo|hay)/.test(n)) return dsets.length ? 'Bases cargadas:\n' + dsets.map(d => `• ${d.name}: ${d.rows} filas · columnas: ${d.head.join(', ')}`).join('\n') : 'Aún no hay bases cargadas. Súbelas en «Centro de datos» y podré consultarlas.';
+  if (/grafic|chart|diagrama/.test(n) && dsets.length) { const d = dsOf(); ctx.ds = d.id; const H = d.head.map(x => norm(x)), hit = H.map((x, i) => [i, x && n.indexOf(x)]).filter(([, p]) => p >= 0).sort((a, b) => a[1] - b[1]).map(([i]) => i);
+    const vi = hit.find(i => isNumCol(d, i)), ci = hit.find(i => i !== vi), type = /pastel|pie|torta/.test(n) ? 'pie' : /dona/.test(n) ? 'doughnut' : /linea|tendencia|evolucion/.test(n) ? 'line' : 'bar';
+    setTimeout(() => openCharts(d, { ci, vi: vi ?? (ci == null ? undefined : ''), agg: /promedio/.test(n) ? 'avg' : /cantidad|cuant|contar/.test(n) ? 'count' : 'sum', type }), 50);
+    return `Te abrí el gráfico de «${d.name}»` + (ci != null ? ` agrupado por ${d.head[ci]}` : '') + (vi != null ? ` con ${d.head[vi]}` : '') + '. Puedes cambiar columnas y tipo, y descargarlo como imagen.' + ((d.charts || []).length ? ` El archivo traía ${d.charts.length} gráfico(s); también los redibujé.` : ''); }
   if (/\b(base|datos|columna|filas?)\b/.test(n) && dsets.length) { const d = dsOf(); ctx.ds = d.id; const H = d.head.map(x => norm(x));
     const col = H.findIndex(hh => hh && n.includes(hh));
     if (/cuantas filas|cuantos registros|tamano/.test(n)) return `${d.name} tiene ${d.rows} filas.`;
@@ -1020,14 +1024,64 @@ async function readTable(file, onP = () => {}) {
   if (!['xlsx', 'xlsm', 'xls', 'xlsb', 'ods', 'csv', 'txt', 'tsv'].includes(ext)) throw new Error('Formato no soportado: .' + ext + ' (usa Excel, CSV u ODS)');
   const buf = await readBuf(file, v => onP(v * 0.6));
   onP(0.65); await loadLib('lib/xlsx.full.min.js?v=1', 'XLSX'); onP(0.75);
-  let wb; try { wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true, dense: true, codepage: 65001 }); }
+  let wb; try { wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true, codepage: 65001 }); }
   catch (e) { throw new Error(/password|encrypt|cfb/i.test(e.message) ? 'El archivo está protegido con contraseña o etiqueta de confidencialidad; guárdalo sin protección e intenta de nuevo' : 'No se pudo leer el archivo: ' + e.message); }
   onP(0.9);
-  const ws = wb.SheetNames.map(n => wb.Sheets[n]).find(s => s && s['!ref']) || null; if (!ws) throw new Error('El archivo no tiene hojas con datos');
-  let rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: false });
-  rows = rows.map(r => r.map(x => x instanceof Date ? iso(x) : x == null ? '' : String(x).trim()));
-  const hi = rows.findIndex(r => r.filter(x => x !== '').length >= Math.min(2, Math.max(...rows.slice(0, 20).map(r => r.filter(x => x !== '').length)))); // salta filas de título vacías
-  onP(1); return hi > 0 ? rows.slice(hi) : rows;
+  const sheets = wb.SheetNames.map(name => { const ws = wb.Sheets[name]; if (!ws || !ws['!ref']) return null;
+    let rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: false }).map(r => r.map(x => x instanceof Date ? iso(x) : x == null ? '' : typeof x === 'number' ? String(Math.round(x * 1e6) / 1e6) : String(x).trim()));
+    const mx = Math.max(0, ...rows.slice(0, 20).map(r => r.filter(x => x !== '').length)), hi = rows.findIndex(r => r.filter(x => x !== '').length >= Math.min(2, mx));
+    rows = hi > 0 ? rows.slice(hi) : rows; return rows.length ? { name, rows } : null; }).filter(Boolean);
+  if (!sheets.length) throw new Error('El archivo no tiene hojas con datos');
+  let charts = []; try { charts = xlsxCharts(buf, wb); } catch (e) { charts = []; }
+  onP(1); const out = sheets[0].rows; out.sheets = sheets; out.charts = charts; return out;
+}
+/* gráficos incrustados en el Excel: se leen sus datos (caché de series) y se redibujan */
+function xlsxCharts(buf, wb) {
+  const z = XLSX.CFB.read(new Uint8Array(buf), { type: 'array' }), out = [], td = new TextDecoder();
+  const ref = f => { if (!f || !wb) return []; const m = f.replace(/\$/g, '').match(/^'?(.+?)'?!([A-Z]+\d+(?::[A-Z]+\d+)?)$/); const ws = m && wb.Sheets[m[1]]; if (!ws) return [];
+    const r = XLSX.utils.decode_range(m[2]), v = []; for (let R = r.s.r; R <= r.e.r; R++) for (let C = r.s.c; C <= r.e.c; C++) { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; v.push(c ? (c.v instanceof Date ? iso(c.v) : c.w ?? c.v) : ''); } return v; };
+  const vals = s => { if (!s) return []; const p = [...s.matchAll(/<pt idx="(\d+)">\s*<v>([^<]*)<\/v>/g)].reduce((o, m) => (o[+m[1]] = m[2], o), []); return p.length ? p : ref((s.match(/<f>([^<]*)<\/f>/) || [])[1]); };
+  z.FullPaths.forEach((p, i) => { if (!/xl\/charts\/chart\d+\.xml$/i.test(p)) return; const x = td.decode(z.FileIndex[i].content).replace(/<(\/?)c:/g, '<$1');
+    const tm = x.match(/<(bar|bar3D|line|line3D|pie|pie3D|doughnut|area|area3D|scatter|radar)Chart>/); if (!tm) return;
+    let type = tm[1].replace('3D', ''); if (type === 'bar' && /<barDir val="bar"/.test(x)) type = 'hbar'; if (type === 'radar' || type === 'scatter') type = 'line';
+    const tt = (x.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '', title = [...tt.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => m[1]).join('');
+    const series = [...x.matchAll(/<ser>([\s\S]*?)<\/ser>/g)].map(m => { const s = m[1], tx = (s.match(/<tx>([\s\S]*?)<\/tx>/) || [])[1] || '';
+      return { name: String(vals(tx)[0] ?? (tx.match(/<a:t>([^<]*)<\/a:t>/) || [])[1] ?? ''), cats: vals((s.match(/<(?:cat|xVal)>([\s\S]*?)<\/(?:cat|xVal)>/) || [])[1]), vals: vals((s.match(/<(?:val|yVal)>([\s\S]*?)<\/(?:val|yVal)>/) || [])[1]).map(v => num(v) || 0) }; }).filter(s => s.vals.length);
+    if (series.length) out.push({ title: title || 'Gráfico ' + (out.length + 1), type, labels: (series[0].cats.length ? series[0].cats : series[0].vals.map((_, j) => j + 1)).map(String), series: series.map(s => ({ name: s.name || 'Serie', vals: s.vals })) }); });
+  return out.slice(0, 20);
+}
+const CH_COLORS = ['#0080E8', '#ED7F32', '#3F886B', '#9648D9', '#47BFF9', '#7E3628', '#003FF9', '#F2B705', '#6A6D76', '#D94848'];
+async function drawChart(canvas, ch) {
+  await loadLib('lib/chart.umd.js?v=1', 'Chart'); const pie = ['pie', 'doughnut'].includes(ch.type), dark = document.documentElement.dataset.theme === 'dark';
+  Chart.defaults.font.family = 'Montserrat, sans-serif'; Chart.defaults.color = dark ? '#cfd3da' : '#3a3d45';
+  if (canvas._c) canvas._c.destroy();
+  canvas._c = new Chart(canvas, { type: ch.type === 'hbar' ? 'bar' : ch.type, data: { labels: ch.labels, datasets: ch.series.map((s, i) => ({ label: s.name, data: s.vals, backgroundColor: pie ? ch.labels.map((_, j) => CH_COLORS[j % CH_COLORS.length]) : CH_COLORS[i % CH_COLORS.length] + (ch.type === 'area' ? '55' : ''), borderColor: pie ? (dark ? '#1d2027' : '#fff') : CH_COLORS[i % CH_COLORS.length], fill: ch.type === 'area', tension: .3, borderWidth: pie ? 2 : ch.type.includes('line') || ch.type === 'area' ? 2 : 0, borderRadius: pie ? 0 : 4 })) },
+    options: { indexAxis: ch.type === 'hbar' ? 'y' : 'x', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: pie || ch.series.length > 1, position: 'bottom' }, title: { display: !!ch.title, text: ch.title, font: { size: 14, weight: '700' } }, tooltip: { callbacks: { label: c => `${c.dataset.label ? c.dataset.label + ': ' : ''}${(+c.raw).toLocaleString('es-CR')}` } } } } });
+}
+const isNumCol = (d, i) => { const v = d.data.slice(0, 200).map(r => r[i]).filter(x => String(x ?? '').trim() !== ''); return v.length > 0 && v.filter(x => num(x) != null && !isNaN(num(x))).length / v.length > .8; };
+function aggChart(d, ci, vi, agg, type, top = 15) {
+  const m = new Map(); d.data.forEach(r => { const k = String(r[ci] ?? '').trim() || '(vacío)', v = vi === '' ? 1 : num(r[vi]); if (vi !== '' && (v == null || isNaN(v))) return; const o = m.get(k) || { s: 0, n: 0 }; o.s += v; o.n++; m.set(k, o); });
+  let e = [...m].map(([k, o]) => [k, agg === 'avg' ? o.s / o.n : agg === 'count' ? o.n : o.s]); if (!/^\d{4}-\d\d/.test(e[0]?.[0] || '')) e.sort((a, b) => b[1] - a[1]); else e.sort((a, b) => a[0].localeCompare(b[0]));
+  if (e.length > top) { const rest = e.slice(top - 1).reduce((s, x) => s + x[1], 0); e = e.slice(0, top - 1).concat([['Otros', agg === 'avg' ? rest / (e.length - top + 1) : rest]]); }
+  const vn = vi === '' || agg === 'count' ? 'Cantidad' : (agg === 'avg' ? 'Promedio de ' : 'Total de ') + d.head[vi];
+  return { title: `${vn} por ${d.head[ci]}`, type, labels: e.map(x => x[0]), series: [{ name: vn, vals: e.map(x => Math.round(x[1] * 100) / 100) }] };
+}
+function openCharts(d, pre = {}) {
+  const H = d.head || [], nums = H.map((_, i) => i).filter(i => isNumCol(d, i)), cats = H.map((_, i) => i).filter(i => !nums.includes(i)), distinct = i => new Set(d.data.map(r => r[i])).size;
+  const ci0 = pre.ci ?? cats.find(i => distinct(i) > 1 && distinct(i) <= 40) ?? cats[0] ?? 0, vi0 = pre.vi ?? nums[0] ?? '';
+  const opt = (arr, v, extra) => [extra, ...arr.map(i => h('option', { value: i, selected: String(i) === String(v) }, H[i]))];
+  const sC = h('select', { class: 'input' }, opt(H.map((_, i) => i), ci0)), sV = h('select', { class: 'input' }, opt(nums, vi0, h('option', { value: '' }, 'Contar filas'))),
+    sA = h('select', { class: 'input' }, [['sum', 'Suma'], ['avg', 'Promedio'], ['count', 'Cantidad']].map(([v, l]) => h('option', { value: v, selected: v === (pre.agg || 'sum') }, l))),
+    sT = h('select', { class: 'input' }, [['bar', 'Barras'], ['hbar', 'Barras horizontales'], ['line', 'Líneas'], ['area', 'Área'], ['pie', 'Pastel'], ['doughnut', 'Dona']].map(([v, l]) => h('option', { value: v, selected: v === (pre.type || 'bar') }, l)));
+  const cv = h('canvas', {}), box = h('div', { class: 'chart-box' }, cv), sum = h('p', { class: 'muted' });
+  const go = () => { const ch = aggChart(d, +sC.value, sV.value === '' ? '' : +sV.value, sV.value === '' ? 'count' : sA.value, sT.value); drawChart(cv, ch).catch(e => toast(e.message, 'err'));
+    const tot = ch.series[0].vals.reduce((s, x) => s + x, 0), mx = ch.labels[ch.series[0].vals.indexOf(Math.max(...ch.series[0].vals))]; sum.textContent = `${ch.labels.length} categorías · total ${tot.toLocaleString('es-CR')} · mayor: ${mx}`; };
+  [sC, sV, sA, sT].forEach(s => s.addEventListener('change', go));
+  const own = (d.charts || []).map(ch => { const c = h('canvas', {}); setTimeout(() => drawChart(c, ch).catch(() => {}), 30); return h('div', { class: 'chart-box sm' }, c); });
+  const body = h('div', {}, own.length ? h('div', {}, h('h4', {}, `📈 Gráficos que venían en el archivo (${own.length}), redibujados`), h('div', { class: 'chart-grid' }, own)) : null,
+    h('h4', {}, '📊 Crear gráfico con los datos'), h('div', { class: 'form-grid' }, h('div', { class: 'field' }, h('label', {}, 'Agrupar por'), sC), h('div', { class: 'field' }, h('label', {}, 'Valor'), sV), h('div', { class: 'field' }, h('label', {}, 'Cálculo'), sA), h('div', { class: 'field' }, h('label', {}, 'Tipo'), sT)), box, sum);
+  modal('Gráficos · ' + d.name, body, [{ label: '⬇ Descargar imagen', cls: 'primary', run: () => { const l = h('a', { href: cv.toDataURL('image/png'), download: d.name.replace(/\.[^.]+$/, '') + '_grafico.png' }); document.body.append(l); l.click(); l.remove(); } }], true);
+  setTimeout(go, 30);
 }
 function guessCol(head, words) { const i = head.findIndex(x => words.some(w => norm(x).includes(w))); return i < 0 ? '' : String(i); }
 async function dataCenter(m) {
@@ -1040,7 +1094,9 @@ async function dataCenter(m) {
     if (!file) return; if (file.size > 26214400) return toast('La base supera 25 MB; divídela o guárdala como CSV', 'err');
     const pg = uploadBar(file.name, file.size); pg.label('Leyendo…');
     let rows; try { rows = await readTable(file, v => pg.set(v, 'Leyendo…')); } catch (e) { pg.fail(e.message); return toast(e.message, 'err'); }
-    pg.done('✓ Leída'); pick.value = '';
+    pg.done('✓ Leída'); pick.value = ''; show(file, rows, 0);
+  }
+  function show(file, all, si) { const rows = all.sheets ? all.sheets[si].rows : all, charts = all.charts || [];
     if (rows.length < 2) return toast('La base no tiene filas de datos', 'err');
     const head = rows[0].map((x, i) => x || 'Columna ' + (i + 1)), data = rows.slice(1).filter(r => r.some(x => String(x).trim()));
     const sel = (id, label, guess, opt) => h('div', { class: 'field' }, h('label', { for: id }, label), h('select', { class: 'input', id }, opt ? h('option', { value: '' }, '— Ninguna —') : null, head.map((x, i) => h('option', { value: i, selected: String(i) === guess }, x))));
@@ -1050,13 +1106,15 @@ async function dataCenter(m) {
       sel('dc-due', 'Columna de fecha límite', guessCol(head, ['fecha', 'vence', 'limite', 'entrega', 'due']), true),
       sel('dc-desc', 'Columna de detalle', guessCol(head, ['descrip', 'detalle', 'comentario', 'nota']), true),
       sel('dc-prio', 'Columna de prioridad', guessCol(head, ['prioridad', 'priority']), true)];
+    const sheetSel = all.sheets && all.sheets.length > 1 ? h('div', { class: 'field' }, h('label', {}, 'Hoja'), h('select', { class: 'input', onchange: e => show(file, all, +e.target.value) }, all.sheets.map((s, i) => h('option', { value: i, selected: i === si }, `${s.name} (${s.rows.length - 1} filas)`)))) : null;
+    const tmp = { name: file.name, head, data, charts };
     const pv = h('div', { class: 'sheet-prev', style: 'max-height:280px' }, h('table', {}, h('tr', {}, head.map(x => h('th', {}, x))), data.slice(0, 8).map(r => h('tr', {}, head.map((_, i) => h('td', {}, r[i] ?? ''))))));
-    area.replaceChildren(h('div', { class: 'card', style: 'margin-top:14px' }, h('h2', {}, '📄 ' + file.name), h('p', { class: 'muted' }, `${data.length} filas · elige qué columna corresponde a cada dato`), pv,
+    area.replaceChildren(h('div', { class: 'card', style: 'margin-top:14px' }, h('h2', {}, '📄 ' + file.name), h('p', { class: 'muted' }, `${data.length} filas` + (charts.length ? ` · ${charts.length} gráfico(s) detectado(s)` : '') + ' · elige qué columna corresponde a cada dato'), sheetSel, pv, h('button', { class: 'btn', style: 'margin:8px 0', onclick: () => openCharts(tmp) }, '📊 Ver gráficos'),
       h('div', { class: 'form-grid' }, colsSel, h('div', { class: 'field' }, h('label', { for: 'dc-def' }, 'Si no hay responsable, asignar a'), defWho)),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', id: 'dc-new', checked: true }), 'Si un responsable no existe en la oficina, agregarlo como integrante'),
       ro ? null : h('div', { style: 'display:flex;gap:8px;justify-content:flex-end' }, h('button', { class: 'btn', onclick: () => area.replaceChildren() }, 'Cancelar'),
         h('button', { class: 'btn', id: 'dc-save', onclick: async e => { e.currentTarget.disabled = true;
-          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: 0, head, data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
+          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: 0, head, charts, data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
           await upload({ id: ds.id }, [file], () => {}); toast('Base guardada: el supervisor ya puede consultarla en el chat', 'ok'); render(); } }, '💾 Solo guardar la base'),
         h('button', { class: 'btn primary', id: 'dc-gen', onclick: async e => {
           e.currentTarget.disabled = true; const gv = id => $('#' + id).value, ti = gv('dc-title'), wi = gv('dc-who'), di = gv('dc-due'), de = gv('dc-desc'), pi = gv('dc-prio'), mk = $('#dc-new').checked;
@@ -1070,7 +1128,7 @@ async function dataCenter(m) {
             rowsOut.push({ title: title.slice(0, 200), body: de !== '' ? String(r[de] ?? '') : '', col_id: col.id, due, prio: pr.startsWith('a') || pr.startsWith('h') ? 'alta' : pr.startsWith('b') || pr.startsWith('l') ? 'baja' : 'media', done: false, is_task: true, from: 'data', position: nextPos(cardsOf(col.id)) + rowsOut.length, author: S.user.id }); }
           if (!rowsOut.length) { e.currentTarget.disabled = false; return toast('No se encontraron tareas en esa columna', 'err'); }
           const ins = await q(sb.from('kcards').insert(rowsOut).select()); S.kcards.push(...ins);
-          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: ins.length, head, data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
+          const [ds] = await q(sb.from('datasets').insert({ name: file.name, rows: data.length, tasks: ins.length, head, charts, data: data.slice(0, 1500).map(r => head.map((_, i) => String(r[i] ?? '').slice(0, 300))), author: S.user.id }).select()); S.datasets.push(ds);
           await upload({ id: ds.id }, [file], () => {});
           toast(`${ins.length} tareas generadas y asignadas`, 'ok'); S.otab = 'office'; render();
         } }, '⚡ Generar tareas'))));
@@ -1078,7 +1136,7 @@ async function dataCenter(m) {
   m.append(h('section', { class: 'card' }, h('h2', {}, 'Centro de datos'), h('p', { class: 'muted' }, 'Sube una base de datos y la oficina convierte cada fila en una tarea asignada al integrante que corresponda.'), ro ? null : h('div', {}, zone, pick)), area,
     h('section', { class: 'card', style: 'margin-top:14px' }, h('h2', {}, 'Bases cargadas'), sets.length ? sets.map(d => { const f = S.attachments.find(a => a.project_id === d.id);
       return h('div', { class: 'file' }, h('span', { class: 'ext', style: 'background:var(--green)' }, (d.name.split('.').pop() || '').slice(0, 4)), h('div', { class: 'fi' }, h('b', {}, d.name), h('span', { class: 'muted' }, `${d.rows} filas · ${d.tasks} tareas generadas · ${new Date(d.created_at).toLocaleString('es-CR')}`)),
-        f ? h('button', { class: 'btn', onclick: () => viewFile(f) }, 'Ver') : null, f ? h('button', { class: 'btn', onclick: () => downloadFile(f) }, 'Descargar') : null); }) : h('p', { class: 'muted' }, 'Aún no has cargado bases de datos.')));
+        d.head ? h('button', { class: 'btn', onclick: () => openCharts(d) }, '📊 Gráficos') : null, f ? h('button', { class: 'btn', onclick: () => viewFile(f) }, 'Ver') : null, f ? h('button', { class: 'btn', onclick: () => downloadFile(f) }, 'Descargar') : null); }) : h('p', { class: 'muted' }, 'Aún no has cargado bases de datos.')));
 }
 
 function chatBubble(m) {
@@ -1475,7 +1533,7 @@ function toggleTheme() { const t = document.documentElement.dataset.theme === 'd
 applyTheme();
 
 /* ---------- cronograma tipo Project (Gantt) ---------- */
-const DAY = 864e5, dOf = s => { const d = new Date(String(s).slice(0, 10) + 'T00:00:00'); return isNaN(d) ? null : d; }, iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+const DAY = 864e5, dOf = s => { const d = new Date(String(s).slice(0, 10) + 'T00:00:00'); return isNaN(d) ? null : d; }, iso = d => { if (!(d instanceof Date) || isNaN(d)) return ''; const x = new Date(d.getTime() - d.getTimezoneOffset() * 6e4); return isNaN(x) ? '' : x.toISOString().slice(0, 10); };
 function openGantt(p) { S.gproj = p.id; S.gclosed?.delete(p.id); S.bview = 'gantt'; S.view = 'board'; renderShell(); scrollTo(0, 0); }
 function renderGantt() {
   const gs = S.groups.slice().sort(byPos).filter(g => S.kg === 'all' || g.id === S.kg || true);
