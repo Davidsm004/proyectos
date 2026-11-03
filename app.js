@@ -1024,11 +1024,14 @@ async function readTable(file, onP = () => {}) {
   if (!['xlsx', 'xlsm', 'xls', 'xlsb', 'ods', 'csv', 'txt', 'tsv'].includes(ext)) throw new Error('Formato no soportado: .' + ext + ' (usa Excel, CSV u ODS)');
   const buf = await readBuf(file, v => onP(v * 0.6));
   onP(0.65); await loadLib('lib/xlsx.full.min.js?v=1', 'XLSX'); onP(0.75);
-  let wb; try { wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: true, codepage: 65001 }); }
+  let wb; try { wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: false, cellNF: true, codepage: 65001 }); }
   catch (e) { throw new Error(/password|encrypt|cfb/i.test(e.message) ? 'El archivo está protegido con contraseña o etiqueta de confidencialidad; guárdalo sin protección e intenta de nuevo' : 'No se pudo leer el archivo: ' + e.message); }
   onP(0.9);
   const sheets = wb.SheetNames.map(name => { const ws = wb.Sheets[name]; if (!ws || !ws['!ref']) return null;
-    let rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: false }).map(r => r.map(x => x instanceof Date ? iso(x) : x == null ? '' : typeof x === 'number' ? String(Math.round(x * 1e6) / 1e6) : String(x).trim()));
+    const rg = XLSX.utils.decode_range(ws['!ref']); let rows = []; // texto tal como se ve en Excel (fechas, horas, montos, teléfonos)
+    for (let R = rg.s.r; R <= rg.e.r; R++) { const r = []; for (let C = rg.s.c; C <= rg.e.c; C++) { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      r.push(!c || c.v == null ? '' : c.t === 'n' && (!c.w || /e[+-]/i.test(c.w) || /^#+$/.test(c.w)) ? String(c.v) : String(c.w ?? c.v).trim()); } if (r.some(x => x !== '')) rows.push(r); }
+    while (rows.length && rows[0].length && rows.every(r => r[r.length - 1] === '')) rows.forEach(r => r.pop());
     const mx = Math.max(0, ...rows.slice(0, 20).map(r => r.filter(x => x !== '').length)), hi = rows.findIndex(r => r.filter(x => x !== '').length >= Math.min(2, mx));
     rows = hi > 0 ? rows.slice(hi) : rows; return rows.length ? { name, rows } : null; }).filter(Boolean);
   if (!sheets.length) throw new Error('El archivo no tiene hojas con datos');
